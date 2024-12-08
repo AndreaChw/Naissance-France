@@ -1,4 +1,5 @@
 ############ INTERPOLAITON, LAG DE TEMPS, LINEARISATION DES VARIABLES
+# rm(list = ls())
 
 library(readxl)
 library(dplyr)
@@ -478,7 +479,7 @@ library(readxl)
 
 # Nettoyage de l'environnement
 cat("Nettoyage de l'environnement...\n")
-rm(list = ls())
+
 cat("Environnement nettoyé.\n")
 
 # Charger les bibliothèques nécessaires
@@ -536,4 +537,140 @@ tryCatch({
 # Résumé des résultats du modèle complet
 cat("Résumé du modèle complet :\n")
 print(summary(full_model))
-################################################################################################
+
+
+
+
+
+####### Standarisation
+
+# Identifier les variables explicatives
+variables_explicatives <- setdiff(names(final_dataframe_no_outliers), c("fec", "Annee"))  # Exclut la variable dépendante et l'index temporel
+
+# Standardiser les variables explicatives
+final_dataframe_standardized <- final_dataframe_no_outliers %>%
+  mutate(across(all_of(variables_explicatives), ~ scale(.) %>% as.vector()))  # Standardisation (moyenne = 0, écart-type = 1)
+
+# Vérifier la moyenne et l'écart type des variables standardisées
+summary(final_dataframe_standardized[variables_explicatives])
+
+# Sauvegarder les données standardisées
+write_xlsx(final_dataframe_standardized, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Standardized.xlsx")
+
+# Charger les données standardisées
+final_data <- read_excel("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Standardized.xlsx")
+
+# Ajuster un modèle de régression
+model_standardized <- lm(fec ~ ., data = final_data[, c("fec", variables_explicatives)])
+summary(model_standardized)
+
+# Ajuster le modèle final avec les variables explicatives restantes
+final_model <- lm(fec ~ ., data = data_for_vif)
+
+# Résumé du modèle
+summary(final_model)
+
+
+
+
+
+#### Tests de diagnostic du modèle
+
+# Test de normalité des résidus
+# Histogramme des résidus
+hist(residuals(final_model), main = "Histogramme des résidus", xlab = "Résidus", col = "lightblue", breaks = 30)
+
+# Test de Shapiro-Wilk pour la normalité
+shapiro_test <- shapiro.test(residuals(final_model))
+print(shapiro_test)
+
+# Test d'homoscédasticité
+# Test de Breusch-Pagan
+library(lmtest)
+bp_test <- bptest(final_model)
+print(bp_test)
+
+# Test d'autocorrélation
+# Test de Durbin-Watson
+dw_test <- dwtest(final_model)
+print(dw_test)
+
+
+#### Sélection des variables significatives
+
+# Obtenir les p-valeurs des coefficients
+coeff_summary <- summary(final_model)$coefficients
+
+# Filtrer les variables significatives (p-value < 0.05)
+significant_vars <- rownames(coeff_summary)[coeff_summary[, 4] < 0.05]
+print("Variables significatives :")
+print(significant_vars)
+
+#### Vérification de la qualité prédictive
+
+# Calcul du R² ajusté
+adj_r2 <- summary(final_model)$adj.r.squared
+cat("R² ajusté :", adj_r2, "\n")
+
+# Effectuer des prédictions
+predictions <- predict(final_model, newdata = data_for_vif)
+data_for_vif$Predicted_Fec <- predictions
+
+# Sauvegarder les données avec prédictions
+write_xlsx(data_for_vif, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Predictions.xlsx")
+
+
+#### Analyse des variables non significatives
+# Charger le package dplyr
+library(dplyr)
+
+# Vérification et ajustement des noms de variables
+non_significant_vars <- as.character(rownames(coeff_summary)[coeff_summary[, 4] >= 0.05])
+print("Variables non significatives :")
+print(non_significant_vars)
+
+# Vérifier si les noms de colonnes correspondent
+print("Colonnes de data_for_vif :")
+print(colnames(data_for_vif))
+
+# Vérifier et ajuster le modèle si des variables non significatives existent
+if (length(non_significant_vars) > 0) {
+  # Vérification supplémentaire pour exclure les variables non présentes
+  valid_vars <- non_significant_vars[non_significant_vars %in% colnames(data_for_vif)]
+  
+  if (length(valid_vars) > 0) {
+    # Créer un nouveau data.frame en excluant les colonnes non significatives
+    reduced_data <- data_for_vif %>% select(-all_of(valid_vars))
+    
+    # Ajuster le modèle avec les variables restantes
+    reduced_model <- lm(fec ~ ., data = reduced_data)
+    
+    # Afficher le résumé du modèle réduit
+    summary(reduced_model)
+  } else {
+    print("Aucune variable valide à exclure.")
+  }
+} else {
+  print("Toutes les variables sont significatives. Aucun ajustement n'est nécessaire.")
+}
+
+
+
+#### Visualisation des résultats 
+# Graphique des résidus vs valeurs ajustées
+plot(final_model$fitted.values, residuals(final_model), 
+     main = "Résidus vs Valeurs Ajustées", 
+     xlab = "Valeurs Ajustées", 
+     ylab = "Résidus", 
+     pch = 20, col = "blue")
+abline(h = 0, lty = 2, col = "red")
+
+# Graphe des prédictions vs valeurs réelles
+plot(data_for_vif$fec, predictions, 
+     main = "Valeurs réelles vs Prédictions", 
+     xlab = "Valeurs réelles (fec)", 
+     ylab = "Prédictions", 
+     pch = 20, col = "green")
+abline(a = 0, b = 1, col = "red")
+
+
