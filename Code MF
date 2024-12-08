@@ -1,4 +1,4 @@
-############################################################## INTERPOLAITON, LAG DE TEMPS, LINEARISATION DES VARIABLES
+#################################### INTERPOLAITON, LAG DE TEMPS, LINEARISATION DES VARIABLES
 
 library(readxl)
 library(dplyr)
