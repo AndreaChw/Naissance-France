@@ -1,0 +1,539 @@
+############ INTERPOLAITON, LAG DE TEMPS, LINEARISATION DES VARIABLES
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(writexl)
+
+# Étape 1 : Charger les données et renommer les colonnes
+data <- read_excel('C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Data_R.xlsx') %>%
+  rename_with(~ gsub("-", "_", .), everything())  # Renommer les colonnes avec des caractères spéciaux
+
+# Identifier les colonnes numériques (exclure Annee mais inclure fec pour interpolation)
+numeric_cols <- setdiff(colnames(data), "Annee")
+
+# Étape 2 : Interpolation trimestrielle (inclut fec)
+data_interpolated <- data %>%
+  complete(Annee = seq(min(Annee), max(Annee), by = 0.25)) %>%
+  mutate(across(all_of(numeric_cols), ~ approx(Annee[!is.na(.)], .[!is.na(.)], xout = Annee)$y))
+
+# Étape 3 : Décalage temporel des variables explicatives
+data_lagged <- data_interpolated %>%
+  arrange(Annee) %>%
+  mutate(across(setdiff(numeric_cols, "fec"), ~ lag(., n = 4), .names = "lag_{col}"))  # Exclut fec
+
+# Nettoyer les NA générés par le lagging
+data_clean <- data_lagged %>%
+  drop_na(starts_with("lag_"))
+
+# Étape 4 : Identifier les variables explicatives laggées
+variables_explicatives_lag <- colnames(data_clean)[grepl("lag_", colnames(data_clean))]
+
+# Étape 5 : Appliquer les transformations et calculer les R^2 ajustés
+results <- data.frame(
+  Variable = character(),
+  Transformation = character(),
+  Adjusted_R2 = numeric(),
+  Improvement = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Définir les transformations possibles
+transformations <- list(
+  "None" = function(x) x,
+  "Log" = function(x) ifelse(x > 0, log(x + 1), NA),
+  "Sqrt" = function(x) ifelse(x >= 0, sqrt(x), NA),
+  "Quad" = function(x) x^2,
+  "Inverse" = function(x) ifelse(x != 0, 1 / (x + 1), NA)
+)
+
+# Fonction pour calculer le R² ajusté
+get_adj_r2 <- function(formula, data) {
+  model <- lm(formula, data = data)
+  return(summary(model)$adj.r.squared)
+}
+
+# Tester chaque transformation pour chaque variable explicative laggée
+for (var in variables_explicatives_lag) {
+  base_r2 <- get_adj_r2(as.formula(paste("fec ~", var)), data_clean)
+  
+  for (trans_name in names(transformations)) {
+    trans_func <- transformations[[trans_name]]
+    transformed_var <- trans_func(data_clean[[var]])
+    
+    # Vérifier les NA générés
+    if (anyNA(transformed_var)) {
+      adj_r2 <- NA
+    } else {
+      data_clean$temp_var <- transformed_var
+      adj_r2 <- get_adj_r2(as.formula("fec ~ temp_var"), data_clean)
+    }
+    
+    # Ajouter les résultats au tableau
+    results <- rbind(
+      results,
+      data.frame(
+        Variable = var,
+        Transformation = trans_name,
+        Adjusted_R2 = adj_r2,
+        Improvement = adj_r2 - base_r2,
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+}
+
+# Étape 6 : Identifier la meilleure transformation pour chaque variable
+best_transformations <- results %>%
+  group_by(Variable) %>%
+  filter(Adjusted_R2 == max(Adjusted_R2, na.rm = TRUE)) %>%
+  mutate(Keep_Transformation = if_else(Improvement > 0.025 & Transformation != "None", "Yes", "No")) %>%
+  arrange(desc(Improvement))
+
+# Étape 7 : Appliquer les transformations retenues et renommer uniquement les variables transformées
+final_dataframe <- data_clean
+
+for (i in 1:nrow(best_transformations)) {
+  var <- best_transformations$Variable[i]
+  trans <- best_transformations$Transformation[i]
+  
+  if (trans != "None" && best_transformations$Keep_Transformation[i] == "Yes") {
+    # Appliquer la transformation
+    final_dataframe[[var]] <- transformations[[trans]](data_clean[[var]])
+    # Renommer la colonne avec la transformation appliquée
+    new_name <- paste0(var, "_", tolower(trans))
+    colnames(final_dataframe)[colnames(final_dataframe) == var] <- new_name
+  }
+}
+
+# Étape 8 : Sauvegarder les résultats
+write_xlsx(best_transformations, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie//Best_Transformations.xlsx")
+write_xlsx(final_dataframe, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Transformed.xlsx")
+
+# Étape 9 : Préparer le DataFrame final avec les variables laggées et la variable dépendante
+final_dataframe_lagged <- final_dataframe %>%
+  select(Annee, fec, starts_with("lag_"))
+
+# Sauvegarde du DataFrame final
+write_xlsx(final_dataframe_lagged, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Lagged.xlsx")
+
+
+################### DETECTION DES OUTLIERS
+
+# Charger les bibliothèques nécessaires
+library(dplyr)
+library(readxl)
+library(writexl)
+
+# Charger le fichier final
+final_dataframe_lagged <- read_excel("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Lagged.xlsx")
+
+# Ajuster un modèle linéaire pour détecter les outliers
+# La variable dépendante est "fec" et toutes les autres colonnes sont explicatives
+model <- lm(fec ~ ., data = final_dataframe_lagged)
+
+# Calculer les résidus standardisés à partir du modèle ajusté
+standardized_residuals <- rstandard(model)
+
+# Identifier les outliers comme les observations où les résidus standardisés ont une valeur absolue > 3
+outliers <- which(abs(standardized_residuals) > 3)
+
+# Supprimer les outliers du dataframe
+final_dataframe_no_outliers <- final_dataframe_lagged[-outliers, ]
+
+# Sauvegarder le fichier final sans outliers
+write_xlsx(final_dataframe_no_outliers, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_No_Outliers.xlsx")
+
+# Résumé du nettoyage
+# Affiche les dimensions initiales et finales pour indiquer le nombre d'observations supprimées
+initial_dim <- dim(final_dataframe_lagged)
+final_dim <- dim(final_dataframe_no_outliers)
+# @# Dimensions initiales : initial_dim
+# @# Dimensions après suppression des outliers : final_dim
+
+# Afficher les premières lignes du fichier final
+head(final_dataframe_no_outliers)
+
+
+######################## DETECTION DES ALIAS
+
+# Charger les bibliothèques nécessaires
+library(readxl)
+library(writexl)
+
+# Charger le fichier final
+final_dataframe_no_outliers <- read_excel("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_No_Outliers.xlsx")
+
+# Étape 1 : Identifier les variables explicatives
+# Exclure 'fec' (variable dépendante) et 'Annee' (index temporel)
+variables_explicatives <- setdiff(names(final_dataframe_no_outliers), c("fec", "Annee"))
+
+# Étape 2 : Ajuster un modèle linéaire avec toutes les variables explicatives
+# Inclure uniquement les variables explicatives dans la formule
+full_model <- lm(fec ~ ., data = final_dataframe_no_outliers[, c("fec", variables_explicatives)])
+
+# Étape 3 : Effectuer le test alias pour détecter les colinéarités parfaites (une variable alias est redondante car elle n'apporte pas d'information supplémentaire au modèle)
+alias_results <- alias(full_model)
+print(alias_results)
+
+# Afficher les colinéarités détectées
+if (length(alias_results$Complete) > 0) {
+  print("Colinéarités parfaites détectées :")
+  print(alias_results$Complete)
+} else {
+  print("Aucune colinéarité parfaite détectée.")
+}
+
+# Étape 4 : Supprimer les variables parfaitement colinéaires (si nécessaire)
+# Identifier les variables problématiques
+problematic_vars <- rownames(alias_results$Complete)
+
+# Supprimer les variables problématiques du dataframe
+final_dataframe_no_alias <- final_dataframe_no_outliers %>%
+  select(-all_of(problematic_vars))
+
+# Sauvegarder le nouveau fichier nettoyé
+write_xlsx(final_dataframe_no_alias, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_No_Alias.xlsx")
+
+# Afficher les premières lignes du nouveau fichier
+print(head(final_dataframe_no_alias))
+
+# Optionnel : Sauvegarder les résultats des alias dans un fichier Excel
+if (length(problematic_vars) > 0) {
+  problematic_vars_df <- data.frame(Variable = problematic_vars)
+  write_xlsx(problematic_vars_df, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Alias_Results.xlsx")
+  
+}
+
+
+################ Colinéarité ? 
+
+library(readxl)
+library(ggplot2)
+library(reshape2)
+library(writexl)
+library(melt)
+library(reshape2)
+
+library(readxl)
+library(ggplot2)
+library(reshape2)
+library(writexl)
+
+# Charger le fichier mis à jour
+final_data_no_alias <- read_excel("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_No_Alias.xlsx")
+
+# Exclure la variable dépendante (fec) et les colonnes non numériques (ex : Annee)
+numeric_data <- final_data_no_alias %>%
+  select(-c(Annee, fec))  # Exclure la colonne temporelle et la variable dépendante
+
+# Calculer la matrice de corrélation
+correlation_matrix <- cor(numeric_data, use = "complete.obs")
+
+# Exporter la matrice de corrélation en Excel
+write_xlsx(as.data.frame(correlation_matrix), "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Correlation_Matrix_No_Dependent.xlsx")
+
+# Afficher la matrice de corrélation dans la console
+print("Matrice de corrélation (sans variable dépendante) :")
+print(correlation_matrix)
+
+# Préparer les données pour la visualisation (Melt pour ggplot2)
+correlation_melted <- melt(correlation_matrix)
+
+# Créer une heatmap de la matrice de corrélation
+heatmap_plot <- ggplot(data = correlation_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, 
+                       limit = c(-1, 1), space = "Lab", 
+                       name = "Corrélation") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)
+  ) +
+  labs(title = "Matrice de corrélation (sans variable dépendante)", x = "Variables", y = "Variables")
+
+# Afficher la heatmap
+print(heatmap_plot)
+
+# Sauvegarder la heatmap
+ggsave("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Correlation_Heatmap.png", 
+       plot = heatmap_plot, 
+       width = 10, 
+       height = 8, 
+       dpi = 300)
+
+# Message de confirmation
+message("Matrice de corrélation affichée, sauvegardée en Excel et en tant que heatmap PNG.")
+
+# Identifier les paires de variables avec corrélation > 0.9
+correlation_melted <- melt(correlation_matrix)  # Transformer la matrice en dataframe
+high_corr_pairs <- correlation_melted %>%
+  filter(value > 0.9 & Var1 != Var2) %>%  # Exclure la diagonale et garder les corrélations élevées
+  arrange(desc(value))  # Trier par valeur de corrélation
+
+# Supprimer les doublons (A-B et B-A)
+high_corr_pairs <- high_corr_pairs %>%
+  mutate(pair = paste0(pmin(as.character(Var1), as.character(Var2)), "-", pmax(as.character(Var1), as.character(Var2)))) %>%
+  distinct(pair, .keep_all = TRUE) %>%
+  select(-pair)
+
+# Afficher les paires de variables corrélées
+print("Paires de variables avec une corrélation supérieure à 0,9 :")
+print(high_corr_pairs)
+
+# Exporter les résultats
+write_xlsx(high_corr_pairs, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/High_Correlation_Pairs.xlsx")
+
+# Message de confirmation
+message("Paires de variables corrélées (corrélation > 0.9) identifiées et sauvegardées dans High_Correlation_Pairs.xlsx.")
+
+########### SUPPRESSION DES VARIABLES LES PLUS CORRELEES 
+
+library(readxl)
+library(dplyr)
+library(writexl)
+
+# Charger le fichier initial
+final_data_no_alias <- read_excel("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_No_Alias.xlsx")
+
+# Vérifier les noms des colonnes
+cat("Colonnes dans le fichier initial :\n")
+print(colnames(final_data_no_alias))
+
+# Liste des variables à supprimer
+variables_to_remove <- c("lag_menenfants", "lag_Famono_sqrt", "lag_jeunes")
+
+# Vérifiez si les variables à supprimer existent dans le DataFrame
+variables_existing <- variables_to_remove[variables_to_remove %in% colnames(final_data_no_alias)]
+variables_not_found <- setdiff(variables_to_remove, variables_existing)
+
+# Avertir si certaines variables ne sont pas trouvées
+if (length(variables_not_found) > 0) {
+  cat("Les variables suivantes n'existent pas dans le fichier et ne seront pas supprimées :\n")
+  print(variables_not_found)
+}
+
+# Supprimer les variables existantes
+final_data_updated <- final_data_no_alias %>%
+  select(-all_of(variables_existing))
+
+# Afficher les colonnes restantes après suppression
+cat("Colonnes restantes après suppression des variables spécifiées :\n")
+print(colnames(final_data_updated))
+
+# Sauvegarder la base mise à jour avec les variables supprimées
+write_xlsx(final_data_updated, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Updated.xlsx")
+
+# Message de confirmation
+message("Les variables spécifiées ont été supprimées (si trouvées). Données ajustées sauvegardées dans 'Final_Data_Updated.xlsx'.")
+
+############## VERIFIER AMELIORAITON 
+
+# Charger le fichier mis à jour
+final_data_updated <- read_excel("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Updated.xlsx")
+
+# Exclure la variable dépendante (fec) et l'index temporel (Annee)
+numeric_data <- final_data_updated %>%
+  select(-c(Annee, fec))  # Exclure les colonnes non numériques pertinentes
+
+# Calculer la matrice de corrélation
+correlation_matrix <- cor(numeric_data, use = "complete.obs")
+
+# Exporter la matrice de corrélation en Excel
+write_xlsx(as.data.frame(correlation_matrix), "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Updated_Correlation_Matrix.xlsx")
+
+# Identifier les paires de variables avec une corrélation > 0.9
+correlation_threshold <- 0.9
+correlation_melted <- as.data.frame(as.table(correlation_matrix)) %>%
+  filter(Freq > correlation_threshold & Var1 != Var2)  # Exclure la diagonale
+
+# Supprimer les doublons (A-B et B-A)
+high_corr_pairs <- correlation_melted %>%
+  mutate(pair = paste0(pmin(as.character(Var1), as.character(Var2)), "-", 
+                       pmax(as.character(Var1), as.character(Var2)))) %>%
+  distinct(pair, .keep_all = TRUE) %>%
+  select(-pair)
+
+# Exporter les paires corrélées en Excel
+write_xlsx(high_corr_pairs, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/High_Correlation_Pairs_Updated.xlsx")
+
+# Créer une heatmap de la matrice de corrélation
+heatmap_plot <- ggplot(data = melt(correlation_matrix), aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, 
+                       limit = c(-1, 1), space = "Lab", 
+                       name = "Corrélation") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)
+  ) +
+  labs(title = "Matrice de corrélation mise à jour", x = "Variables", y = "Variables")
+
+# Afficher la heatmap
+print(heatmap_plot)
+
+# Sauvegarder la heatmap
+ggsave("//Users/mehdifehri/Desktop/R/Données/Updated_Correlation_Heatmap.png", 
+       plot = heatmap_plot, 
+       width = 10, 
+       height = 8, 
+       dpi = 300)
+
+# Message de confirmation
+message("Matrice de corrélation mise à jour affichée, sauvegardée en Excel et en tant que heatmap PNG.")
+message("Paires corrélées (corrélation > 0.9) sauvegardées dans 'High_Correlation_Pairs_Updated.xlsx'.")
+
+################### Test VIF
+
+# Charger les bibliothèques nécessaires
+library(readxl)
+library(car)  # Pour le calcul du VIF
+library(writexl)
+library(dplyr)
+
+# Charger le fichier nettoyé contenant les variables synthétiques
+final_data <- read_excel("C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_Updated.xlsx")
+
+# Étape 1 : Identifier les variables explicatives
+variables_explicatives <- setdiff(names(final_data), c("fec", "Annee"))
+
+# Créer une copie des données pour effectuer les modifications
+data_for_vif <- final_data
+
+# Définir le seuil de VIF
+vif_threshold <- 100
+
+# Liste pour stocker les résultats à chaque itération
+iteration_results <- list()
+removed_variables <- data.frame(Iteration = integer(), Variable = character(), VIF_Value = numeric())
+
+# Boucle itérative pour supprimer les variables avec VIF élevé
+iteration <- 1
+while (TRUE) {
+  cat("\n--- Itération", iteration, "---\n")
+  
+  # Ajuster un modèle linéaire avec les variables explicatives restantes
+  current_model <- lm(fec ~ ., data = data_for_vif[, c("fec", variables_explicatives)])
+  
+  # Calculer le VIF pour chaque variable explicative
+  vif_values <- vif(current_model)
+  
+  # Sauvegarder les résultats de l'itération
+  iteration_results[[iteration]] <- data.frame(Variable = names(vif_values), VIF = vif_values, Iteration = iteration)
+  
+  # Identifier les variables avec un VIF supérieur au seuil
+  high_vif_vars <- names(vif_values[vif_values > vif_threshold])
+  
+  # Afficher les VIF actuels
+  cat("Facteurs d'inflation de la variance (VIF) actuels :\n")
+  print(vif_values)
+  
+  # Vérifier s'il reste des variables avec un VIF élevé
+  if (length(high_vif_vars) == 0) {
+    cat("Toutes les variables ont un VIF <= 100. Fin de la boucle.\n")
+    break
+  }
+  
+  # Identifier la variable avec le VIF maximum
+  variable_to_remove <- names(which.max(vif_values))
+  max_vif_value <- max(vif_values)
+  cat("Variable avec le VIF le plus élevé :", variable_to_remove, "(", max_vif_value, ")\n")
+  
+  # Ajouter la variable supprimée à la liste des variables supprimées
+  removed_variables <- rbind(removed_variables, data.frame(Iteration = iteration, Variable = variable_to_remove, VIF_Value = max_vif_value))
+  
+  # Supprimer cette variable des données et des variables explicatives
+  data_for_vif <- data_for_vif %>% select(-all_of(variable_to_remove))
+  variables_explicatives <- setdiff(variables_explicatives, variable_to_remove)
+  
+  # Recalculer les VIF après suppression de la variable
+  cat("Recalcul des VIF après suppression de la variable...\n")
+  
+  # Augmenter le compteur d'itérations
+  iteration <- iteration + 1
+}
+
+# Sauvegarder les données finales sans VIF élevé
+write_xlsx(data_for_vif, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_No_High_VIF_Iterative.xlsx")
+cat("Les données finales après suppression des variables avec VIF > 100 ont été sauvegardées dans 'Final_Data_No_High_VIF_Iterative.xlsx'.\n")
+
+# Sauvegarder les résultats des VIF à chaque itération
+all_iterations_vif <- bind_rows(iteration_results)
+write_xlsx(all_iterations_vif, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Iterative_VIF_Results.xlsx")
+cat("Les résultats des VIF pour chaque itération ont été sauvegardés dans 'Iterative_VIF_Results.xlsx'.\n")
+
+# Sauvegarder les variables supprimées et leurs VIF
+write_xlsx(removed_variables, "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Removed_Variables_VIF.xlsx")
+cat("Les variables supprimées avec leurs VIF évolutifs ont été sauvegardées dans 'Removed_Variables_VIF.xlsx'.\n")
+
+
+
+##### Application de la Transformation de Box-Cox pour Améliorer les Hypothèses de Normalité dans la Régression Linéaire 
+
+# La transformation de Box-Cox est une technique statistique utilisée pour transformer des données non-normales en une distribution plus normale, améliorant ainsi les hypothèses de la régression linéaire.
+
+library(MASS)
+library(writexl)
+library(readxl)
+
+# Nettoyage de l'environnement
+cat("Nettoyage de l'environnement...\n")
+rm(list = ls())
+cat("Environnement nettoyé.\n")
+
+# Charger les bibliothèques nécessaires
+cat("Chargement des bibliothèques...\n")
+required_packages <- c("MASS", "writexl", "readxl")
+for (pkg in required_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+cat("Toutes les bibliothèques nécessaires sont prêtes.\n")
+
+# Charger les données
+cat("Chargement des données...\n")
+tryCatch({
+  fichier_donnees <- "C:/Users/chahw/OneDrive/Desktop/Projet R - Econometrie/Final_Data_No_High_VIF_Iterative.xlsx"
+  if (!file.exists(fichier_donnees)) stop("Le fichier spécifié n'existe pas. Vérifiez le chemin.")
+  final_dataframe <- read_excel(fichier_donnees)
+  cat("Données chargées avec succès depuis le fichier Excel.\n")
+}, error = function(e) {
+  stop("Erreur lors du chargement des données : ", conditionMessage(e))
+})
+
+# Vérification des données
+cat("Vérification de la structure des données...\n")
+if (!"fec" %in% names(final_dataframe)) {
+  stop("La colonne 'fec' (variable dépendante) est absente des données.")
+}
+if (ncol(final_dataframe) < 2) {
+  stop("Le DataFrame doit contenir au moins une variable explicative en plus de 'fec'.")
+}
+cat("Les données sont valides.\n")
+
+# Identifier les variables explicatives
+cat("Identification des variables explicatives...\n")
+variables_explicatives <- setdiff(names(final_dataframe), c("fec", "Annee"))
+cat("Variables explicatives : ", paste(variables_explicatives, collapse = ", "), "\n")
+
+# Construire un modèle avec toutes les variables explicatives
+cat("Construction et ajustement d'un modèle complet...\n")
+model_formula <- as.formula(paste("fec ~", paste(variables_explicatives, collapse = " + ")))
+full_model <- lm(model_formula, data = final_dataframe)
+cat("Modèle complet ajusté avec succès.\n")
+
+# Exécuter le test de Box-Cox sur le modèle complet
+cat("Exécution du test de Box-Cox sur le modèle complet...\n")
+tryCatch({
+  boxcox_results <- boxcox(full_model, lambda = seq(-2, 2, by = 0.1))
+  cat("Test de Box-Cox exécuté avec succès.\n")
+}, error = function(e) {
+  stop("Erreur lors de l'exécution de Box-Cox : ", conditionMessage(e))
+})
+
+# Résumé des résultats du modèle complet
+cat("Résumé du modèle complet :\n")
+print(summary(full_model))
+################################################################################################
