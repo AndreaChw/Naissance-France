@@ -160,3 +160,124 @@ final_dataframe_lagged <- final_dataframe %>%
 
 # Sauvegarde du DataFrame final laggé
 write_xlsx(final_dataframe_lagged, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Lagged.xlsx")
+
+##############################################################
+# DÉTECTION DES OUTLIERS ET VISUALISATION DES RÉSIDUS STANDARDISÉS
+##############################################################
+
+library(dplyr)
+library(readxl)
+library(writexl)
+library(ggplot2)
+
+# Étape 1 : Charger le DataFrame final laggé
+final_dataframe_lagged <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_Lagged.xlsx")
+
+# Étape 2 : Ajuster un modèle linéaire
+# Variable dépendante : "fec"
+# Variables explicatives : toutes les colonnes sauf "fec" et "Annee"
+model <- lm(fec ~ ., data = final_dataframe_lagged)
+
+# Étape 3 : Calculer les résidus standardisés
+standardized_residuals <- rstandard(model)
+
+# Étape 4 : Créer un DataFrame avec les résidus standardisés et un index
+residuals_df <- final_dataframe_lagged %>%
+  mutate(
+    Index = row_number(),
+    Std_Resid = standardized_residuals
+  )
+
+# Étape 5 : Définir un seuil pour la détection des outliers
+# Ici, on considère comme outlier toute observation avec |résidu| > 2
+threshold <- 2
+
+# Étape 6 : Identifier les outliers
+outliers_df <- residuals_df %>%
+  filter(abs(Std_Resid) > threshold)
+
+# Étape 7 : Visualisation des résidus standardisés
+plot_residus <- ggplot(residuals_df, aes(x = Index, y = Std_Resid)) +
+  geom_point() +
+  geom_hline(yintercept = c(-threshold, threshold), color = "red", linetype = "dashed") +
+  labs(
+    title = "Résidus standardisés du modèle linéaire",
+    x = "Index de l'observation",
+    y = "Résidu standardisé"
+  ) +
+  theme_minimal()
+
+# Afficher le graphique
+print(plot_residus)
+
+# Étape 8 : Sauvegarder le graphique des résidus standardisés
+ggsave("//Users/mehdifehri/Desktop/R/Données/Graphique_Residus_Standardises.png", plot = plot_residus)
+
+# Étape 9 : Créer un tableau récapitulatif des outliers
+# Ajout d'une colonne 'Reason' pour préciser la raison de la suppression (résidu trop élevé)
+if (nrow(outliers_df) > 0) {
+  recap_outliers <- outliers_df %>%
+    mutate(Reason = paste("Résidu standardisé > ±", threshold))
+} else {
+  recap_outliers <- data.frame(Index = integer(),
+                               Std_Resid = numeric(),
+                               Reason = character(),
+                               stringsAsFactors = FALSE)
+}
+
+# Étape 10 : Supprimer les outliers du DataFrame original
+final_dataframe_no_outliers <- final_dataframe_lagged[-outliers_df$Index, ]
+
+# Étape 11 : Sauvegarder les DataFrames et le tableau récapitulatif
+write_xlsx(final_dataframe_no_outliers, "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Outliers.xlsx")
+write_xlsx(recap_outliers, "//Users/mehdifehri/Desktop/R/Données/Recap_Outliers.xlsx")
+
+# Étape 12 : Afficher des informations sur le nombre d'observations supprimées
+initial_dim <- dim(final_dataframe_lagged)
+final_dim <- dim(final_dataframe_no_outliers)
+cat("Dimensions initiales :", initial_dim[1], "x", initial_dim[2], "\n")
+cat("Dimensions finales (sans outliers) :", final_dim[1], "x", final_dim[2], "\n")
+cat("Nombre d'observations supprimées :", initial_dim[1] - final_dim[1], "\n")
+
+
+##############################################################
+# DÉTECTION DES ALIAS (COLINÉARITÉS PARFAITES)
+##############################################################
+
+library(readxl)
+library(writexl)
+
+# Étape 1 : Charger le DataFrame sans outliers
+final_dataframe_no_outliers <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Outliers.xlsx")
+
+# Étape 2 : Identifier les variables explicatives
+# On exclut 'fec' (variable dépendante) et 'Annee' (index temporel)
+variables_explicatives <- setdiff(names(final_dataframe_no_outliers), c("fec", "Annee"))
+
+# Étape 3 : Ajuster un modèle linéaire complet avec toutes les variables explicatives
+full_model <- lm(fec ~ ., data = final_dataframe_no_outliers[, c("fec", variables_explicatives)])
+
+# Étape 4 : Détecter les colinéarités parfaites avec la fonction alias()
+alias_results <- alias(full_model)
+
+# Étape 5 : Afficher les résultats d'alias
+print(alias_results)
+
+# Étape 6 : Déterminer les variables problématiques (colinéarité parfaite)
+problematic_vars <- rownames(alias_results$Complete)
+
+# Étape 7 : Si des variables problématiques sont détectées, les supprimer
+if (length(problematic_vars) > 0) {
+  final_dataframe_no_alias <- final_dataframe_no_outliers %>%
+    select(-all_of(problematic_vars))
+  
+  # Étape 8 : Sauvegarder le nouveau DataFrame sans alias
+  write_xlsx(final_dataframe_no_alias, "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Alias.xlsx")
+  
+  # Étape 9 : Sauvegarder la liste des variables problématiques
+  problematic_vars_df <- data.frame(Variable = problematic_vars)
+  write_xlsx(problematic_vars_df, "//Users/mehdifehri/Desktop/R/Données/Alias_Results.xlsx")
+  
+} else {
+  cat("Aucune colinéarité parfaite détectée, aucune variable supprimée.\n")
+}
