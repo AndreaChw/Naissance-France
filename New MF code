@@ -1,4 +1,6 @@
-############################################################## INTERPOLAITON, LAG DE TEMPS, LINEARISATION DES VARIABLES
+##############################################################
+# IMPORTATION, RENOMMAGE ET PRÉPARATION DES DONNÉES
+##############################################################
 
 library(readxl)
 library(dplyr)
@@ -6,30 +8,47 @@ library(tidyr)
 library(writexl)
 
 # Étape 1 : Charger les données et renommer les colonnes
-data <- read_excel('//Users/mehdifehri/Desktop/R/Données/Data R Ajustée.xlsx') %>%
-  rename_with(~ gsub("-", "_", .), everything())  # Renommer les colonnes avec des caractères spéciaux
+data <- read_excel("//Users/mehdifehri/Desktop/R/Données/Data R Ajustée.xlsx") %>%
+  rename_with(~ gsub("-", "_", .), everything())  # Remplace les traits d'union par des underscores
 
-# Identifier les colonnes numériques (exclure Annee mais inclure fec pour interpolation)
+# Identifier les colonnes numériques (à l'exception de 'Annee')
 numeric_cols <- setdiff(colnames(data), "Annee")
 
-# Étape 2 : Interpolation trimestrielle (inclut fec)
+
+##############################################################
+# INTERPOLATION TRIMESTRIELLE
+##############################################################
+
+# Étape 2 : Interpolation trimestrielle (inclut 'fec')
 data_interpolated <- data %>%
   complete(Annee = seq(min(Annee), max(Annee), by = 0.25)) %>%
-  mutate(across(all_of(numeric_cols), ~ approx(Annee[!is.na(.)], .[!is.na(.)], xout = Annee)$y))
+  mutate(across(all_of(numeric_cols),
+                ~ approx(Annee[!is.na(.)], .[!is.na(.)], xout = Annee)$y))
 
-# Étape 3 : Décalage temporel des variables explicatives
+
+##############################################################
+# DÉCALAGE TEMPOREL (LAG) DES VARIABLES EXPLICATIVES
+##############################################################
+
+# Étape 3 : Décalage temporel des variables (exclure 'fec')
 data_lagged <- data_interpolated %>%
   arrange(Annee) %>%
-  mutate(across(setdiff(numeric_cols, "fec"), ~ lag(., n = 4), .names = "lag_{col}"))  # Exclut fec
+  mutate(across(setdiff(numeric_cols, "fec"), ~ lag(., n = 4), .names = "lag_{col}"))
 
-# Nettoyer les NA générés par le lagging
+# Supprimer les lignes avec NA générés par le lag
 data_clean <- data_lagged %>%
   drop_na(starts_with("lag_"))
 
 # Étape 4 : Identifier les variables explicatives laggées
 variables_explicatives_lag <- colnames(data_clean)[grepl("lag_", colnames(data_clean))]
 
-# Étape 5 : Appliquer les transformations et calculer les \( R^2 \) ajustés
+
+##############################################################
+# DÉFINITION DES TRANSFORMATIONS ET CALCUL DU R² AJUSTÉ
+##############################################################
+
+# Étape 5 : Appliquer les transformations et calculer les R² ajustés
+# Créer un tableau pour stocker les résultats
 results <- data.frame(
   Variable = character(),
   Transformation = character(),
@@ -40,28 +59,34 @@ results <- data.frame(
 
 # Définir les transformations possibles
 transformations <- list(
-  "None" = function(x) x,
-  "Log" = function(x) ifelse(x > 0, log(x + 1), NA),
-  "Sqrt" = function(x) ifelse(x >= 0, sqrt(x), NA),
-  "Quad" = function(x) x^2,
+  "None"    = function(x) x,
+  "Log"     = function(x) ifelse(x > 0, log(x + 1), NA),
+  "Sqrt"    = function(x) ifelse(x >= 0, sqrt(x), NA),
+  "Quad"    = function(x) x^2,
   "Inverse" = function(x) ifelse(x != 0, 1 / (x + 1), NA)
 )
 
 # Fonction pour calculer le R² ajusté
 get_adj_r2 <- function(formula, data) {
   model <- lm(formula, data = data)
-  return(summary(model)$adj.r.squared)
+  summary(model)$adj.r.squared
 }
 
-# Tester chaque transformation pour chaque variable explicative laggée
+
+##############################################################
+# TEST DES TRANSFORMATIONS POUR CHAQUE VARIABLE EXPLICATIVE LAGGÉE
+##############################################################
+
 for (var in variables_explicatives_lag) {
+  # R² ajusté de base (sans transformation)
   base_r2 <- get_adj_r2(as.formula(paste("fec ~", var)), data_clean)
   
+  # Tester chaque transformation
   for (trans_name in names(transformations)) {
     trans_func <- transformations[[trans_name]]
     transformed_var <- trans_func(data_clean[[var]])
     
-    # Vérifier les NA générés
+    # Vérifier la présence de NA suite à la transformation
     if (anyNA(transformed_var)) {
       adj_r2 <- NA
     } else {
@@ -83,36 +108,55 @@ for (var in variables_explicatives_lag) {
   }
 }
 
-# Étape 6 : Identifier la meilleure transformation pour chaque variable
+
+##############################################################
+# SÉLECTION DE LA MEILLEURE TRANSFORMATION POUR CHAQUE VARIABLE
+##############################################################
+
+# Étape 6 : Identifier la meilleure transformation
 best_transformations <- results %>%
   group_by(Variable) %>%
   filter(Adjusted_R2 == max(Adjusted_R2, na.rm = TRUE)) %>%
   mutate(Keep_Transformation = if_else(Improvement > 0.05 & Transformation != "None", "Yes", "No")) %>%
   arrange(desc(Improvement))
 
-# Étape 7 : Appliquer les transformations retenues et renommer uniquement les variables transformées
+
+##############################################################
+# APPLICATION DES TRANSFORMATIONS RETENUES
+##############################################################
+
+# Étape 7 : Appliquer les transformations retenues et ajouter les variables transformées
 final_dataframe <- data_clean
 
 for (i in 1:nrow(best_transformations)) {
-  var <- best_transformations$Variable[i]
+  var  <- best_transformations$Variable[i]
   trans <- best_transformations$Transformation[i]
   
+  # Appliquer la transformation uniquement si "Yes"
   if (trans != "None" && best_transformations$Keep_Transformation[i] == "Yes") {
-    # Appliquer la transformation
-    final_dataframe[[var]] <- transformations[[trans]](data_clean[[var]])
-    # Renommer la colonne avec la transformation appliquée
+    transformed_var <- transformations[[trans]](data_clean[[var]])
     new_name <- paste0(var, "_", tolower(trans))
-    colnames(final_dataframe)[colnames(final_dataframe) == var] <- new_name
+    final_dataframe[[new_name]] <- transformed_var
   }
 }
 
-# Étape 8 : Sauvegarder les résultats
+
+##############################################################
+# SAUVEGARDE DES RÉSULTATS
+##############################################################
+
+# Étape 8 : Sauvegarder les résultats sur les transformations et le DataFrame final
 write_xlsx(best_transformations, "//Users/mehdifehri/Desktop/R/Données/Best_Transformations.xlsx")
 write_xlsx(final_dataframe, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Transformed.xlsx")
 
-# Étape 9 : Préparer le DataFrame final avec les variables laggées et la variable dépendante
+
+##############################################################
+# CRÉATION DU DATAFRAME FINAL AVEC LES VAR. LAGGÉES ET LA VAR. DÉPENDANTE
+##############################################################
+
+# Étape 9 : Préparer le DataFrame final (Annee, fec, lag_)
 final_dataframe_lagged <- final_dataframe %>%
   select(Annee, fec, starts_with("lag_"))
 
-# Sauvegarde du DataFrame final
+# Sauvegarde du DataFrame final laggé
 write_xlsx(final_dataframe_lagged, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Lagged.xlsx")
