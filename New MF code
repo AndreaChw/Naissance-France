@@ -9,22 +9,36 @@ library(writexl)
 
 # Étape 1 : Charger les données et renommer les colonnes
 data <- read_excel("//Users/mehdifehri/Desktop/R/Données/Data R Ajustée.xlsx") %>%
-  rename_with(~ gsub("-", "_", .), everything())  # Remplace les traits d'union par des underscores
+  rename_with(~ gsub("-", "_", .), everything())
 
-# Identifier les colonnes numériques (à l'exception de 'Annee')
-numeric_cols <- setdiff(colnames(data), "Annee")
+# Étape 2 : Créer des variables synthétiques
+data <- data %>%
+  mutate(
+    synthé_spepro = rowMeans(select(., speprofemmes, spepromenages), na.rm = TRUE),
+    synthé_individual = rowMeans(select(., nochild, solo), na.rm = TRUE)
+  )
+
+# Étape 3 : Supprimer les anciennes colonnes
+data <- data %>%
+  select(-speprofemmes, -spepromenages, -nochild, -solo)
+
+# Vérification des colonnes après modification
+cat("Les variables synthétiques ont été créées et les anciennes variables ont été supprimées.\n")
+print(colnames(data))
 
 
 ##############################################################
 # INTERPOLATION TRIMESTRIELLE
 ##############################################################
 
+# Identifier les colonnes numériques (à l'exception de 'Annee')
+numeric_cols <- setdiff(colnames(data), "Annee")
+
 # Étape 2 : Interpolation trimestrielle (inclut 'fec')
 data_interpolated <- data %>%
   complete(Annee = seq(min(Annee), max(Annee), by = 0.25)) %>%
   mutate(across(all_of(numeric_cols),
                 ~ approx(Annee[!is.na(.)], .[!is.na(.)], xout = Annee)$y))
-
 
 ##############################################################
 # DÉCALAGE TEMPOREL (LAG) DES VARIABLES EXPLICATIVES
@@ -42,13 +56,11 @@ data_clean <- data_lagged %>%
 # Étape 4 : Identifier les variables explicatives laggées
 variables_explicatives_lag <- colnames(data_clean)[grepl("lag_", colnames(data_clean))]
 
-
 ##############################################################
 # DÉFINITION DES TRANSFORMATIONS ET CALCUL DU R² AJUSTÉ
 ##############################################################
 
 # Étape 5 : Appliquer les transformations et calculer les R² ajustés
-# Créer un tableau pour stocker les résultats
 results <- data.frame(
   Variable = character(),
   Transformation = character(),
@@ -63,7 +75,7 @@ transformations <- list(
   "Log"     = function(x) ifelse(x > 0, log(x + 1), NA),
   "Sqrt"    = function(x) ifelse(x >= 0, sqrt(x), NA),
   "Quad"    = function(x) x^2,
-  "Inverse" = function(x) ifelse(x != 0, 1 / (x + 1), NA)
+  "Inverse" = function(x) 1/x
 )
 
 # Fonction pour calculer le R² ajusté
@@ -72,21 +84,17 @@ get_adj_r2 <- function(formula, data) {
   summary(model)$adj.r.squared
 }
 
-
 ##############################################################
 # TEST DES TRANSFORMATIONS POUR CHAQUE VARIABLE EXPLICATIVE LAGGÉE
 ##############################################################
 
 for (var in variables_explicatives_lag) {
-  # R² ajusté de base (sans transformation)
   base_r2 <- get_adj_r2(as.formula(paste("fec ~", var)), data_clean)
   
-  # Tester chaque transformation
   for (trans_name in names(transformations)) {
     trans_func <- transformations[[trans_name]]
     transformed_var <- trans_func(data_clean[[var]])
     
-    # Vérifier la présence de NA suite à la transformation
     if (anyNA(transformed_var)) {
       adj_r2 <- NA
     } else {
@@ -94,7 +102,6 @@ for (var in variables_explicatives_lag) {
       adj_r2 <- get_adj_r2(as.formula("fec ~ temp_var"), data_clean)
     }
     
-    # Ajouter les résultats au tableau
     results <- rbind(
       results,
       data.frame(
@@ -108,31 +115,28 @@ for (var in variables_explicatives_lag) {
   }
 }
 
-
 ##############################################################
 # SÉLECTION DE LA MEILLEURE TRANSFORMATION POUR CHAQUE VARIABLE
 ##############################################################
 
-# Étape 6 : Identifier la meilleure transformation
 best_transformations <- results %>%
   group_by(Variable) %>%
   filter(Adjusted_R2 == max(Adjusted_R2, na.rm = TRUE)) %>%
   mutate(Keep_Transformation = if_else(Improvement > 0.05 & Transformation != "None", "Yes", "No")) %>%
   arrange(desc(Improvement))
 
-
 ##############################################################
-# APPLICATION DES TRANSFORMATIONS RETENUES
+# APPLICATION DES TRANSFORMATIONS RETENUES (POUR ARCHIVE)
 ##############################################################
 
-# Étape 7 : Appliquer les transformations retenues et ajouter les variables transformées
+# On crée un data frame "transformé" juste pour référence, 
+# mais on ne va pas l'utiliser dans la suite de l'analyse.
 final_dataframe <- data_clean
 
 for (i in 1:nrow(best_transformations)) {
   var  <- best_transformations$Variable[i]
   trans <- best_transformations$Transformation[i]
   
-  # Appliquer la transformation uniquement si "Yes"
   if (trans != "None" && best_transformations$Keep_Transformation[i] == "Yes") {
     transformed_var <- transformations[[trans]](data_clean[[var]])
     new_name <- paste0(var, "_", tolower(trans))
@@ -140,29 +144,50 @@ for (i in 1:nrow(best_transformations)) {
   }
 }
 
-
 ##############################################################
-# SAUVEGARDE DES RÉSULTATS
+# CRÉATION DES DEUX DATAFRAMES : ORIGINAL VS TRANSFORMÉ 
 ##############################################################
 
-# Étape 8 : Sauvegarder les résultats sur les transformations et le DataFrame final
+# DataFrame original (on n'y touche pas, il reste comme avant)
+final_dataframe_original <- data_clean %>%
+  select(Annee, fec, all_of(variables_explicatives_lag))
+
+# Variables transformées retenues
+vars_transformed <- best_transformations %>%
+  filter(Keep_Transformation == "Yes", Transformation != "None") %>%
+  pull(Variable)
+
+# Noms des nouvelles variables transformées retenues
+transformations_chosen <- best_transformations %>%
+  filter(Keep_Transformation == "Yes", Transformation != "None") %>%
+  mutate(new_name = paste0(Variable, "_", tolower(Transformation))) %>%
+  pull(new_name)
+
+# DataFrame transformé : Conserver TOUTES les variables originales + les variables transformées retenues
+final_dataframe_transformed <- final_dataframe %>%
+  select(
+    Annee,
+    fec,
+    # Garder toutes les variables originales
+    all_of(variables_explicatives_lag),
+    # Ajouter uniquement les variables transformées retenues
+    all_of(transformations_chosen)
+  )
+
+# Sauvegarder les résultats sur les transformations
 write_xlsx(best_transformations, "//Users/mehdifehri/Desktop/R/Données/Best_Transformations.xlsx")
-write_xlsx(final_dataframe, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Transformed.xlsx")
+write_xlsx(final_dataframe_transformed, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Transformed.xlsx")
+
+# Sauvegarde du DataFrame original
+write_xlsx(final_dataframe_original, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Original.xlsx")
+
+cat("Les transformations potentielles ont été calculées et enregistrées.\n")
+cat("Le DataFrame original (sans transformation) est inchangé.\n")
+cat("Le DataFrame transformé contient maintenant les variables originales + les variables transformées retenues.\n")
 
 
 ##############################################################
-# CRÉATION DU DATAFRAME FINAL AVEC LES VAR. LAGGÉES ET LA VAR. DÉPENDANTE
-##############################################################
-
-# Étape 9 : Préparer le DataFrame final (Annee, fec, lag_)
-final_dataframe_lagged <- final_dataframe %>%
-  select(Annee, fec, starts_with("lag_"))
-
-# Sauvegarde du DataFrame final laggé
-write_xlsx(final_dataframe_lagged, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Lagged.xlsx")
-
-##############################################################
-# DÉTECTION DES OUTLIERS ET VISUALISATION DES RÉSIDUS STANDARDISÉS
+# PARTIE 1 : DÉTECTION DES OUTLIERS SUR FINAL_DATA_ORIGINAL
 ##############################################################
 
 library(dplyr)
@@ -170,51 +195,44 @@ library(readxl)
 library(writexl)
 library(ggplot2)
 
-# Étape 1 : Charger le DataFrame final laggé
-final_dataframe_lagged <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_Lagged.xlsx")
+# Charger le DataFrame original depuis le fichier
+final_dataframe_transformed <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_Transformed.xlsx")
 
-# Étape 2 : Ajuster un modèle linéaire
-# Variable dépendante : "fec"
-# Variables explicatives : toutes les colonnes sauf "fec" et "Annee"
-model <- lm(fec ~ ., data = final_dataframe_lagged)
+# Ajuster un modèle linéaire sur le DataFrame original
+model <- lm(fec ~ ., data = final_dataframe_transformed %>% select(-Annee))
 
-# Étape 3 : Calculer les résidus standardisés
+# Calculer les résidus standardisés
 standardized_residuals <- rstandard(model)
 
-# Étape 4 : Créer un DataFrame avec les résidus standardisés et un index
-residuals_df <- final_dataframe_lagged %>%
+# Ajouter les résidus au DataFrame original
+residuals_df <- final_dataframe_transformed %>%
   mutate(
     Index = row_number(),
     Std_Resid = standardized_residuals
   )
 
-# Étape 5 : Définir un seuil pour la détection des outliers
-# Ici, on considère comme outlier toute observation avec |résidu| > 2
+# Définir un seuil pour la détection des outliers
 threshold <- 2
-
-# Étape 6 : Identifier les outliers
 outliers_df <- residuals_df %>%
   filter(abs(Std_Resid) > threshold)
 
-# Étape 7 : Visualisation des résidus standardisés
+# Visualisation des résidus standardisés
 plot_residus <- ggplot(residuals_df, aes(x = Index, y = Std_Resid)) +
   geom_point() +
   geom_hline(yintercept = c(-threshold, threshold), color = "red", linetype = "dashed") +
   labs(
-    title = "Résidus standardisés du modèle linéaire",
+    title = "Résidus standardisés (DataFrame Transformed)",
     x = "Index de l'observation",
     y = "Résidu standardisé"
   ) +
   theme_minimal()
 
-# Afficher le graphique
 print(plot_residus)
 
-# Étape 8 : Sauvegarder le graphique des résidus standardisés
-ggsave("//Users/mehdifehri/Desktop/R/Données/Graphique_Residus_Standardises.png", plot = plot_residus)
+# (Optionnel) Sauvegarder le graphique
+ggsave("//Users/mehdifehri/Desktop/R/Données/Graphique_Residus_Standardises_Transformed.png", plot = plot_residus)
 
-# Étape 9 : Créer un tableau récapitulatif des outliers
-# Ajout d'une colonne 'Reason' pour préciser la raison de la suppression (résidu trop élevé)
+# Créer un tableau récapitulatif des outliers
 if (nrow(outliers_df) > 0) {
   recap_outliers <- outliers_df %>%
     mutate(Reason = paste("Résidu standardisé > ±", threshold))
@@ -225,59 +243,780 @@ if (nrow(outliers_df) > 0) {
                                stringsAsFactors = FALSE)
 }
 
-# Étape 10 : Supprimer les outliers du DataFrame original
-final_dataframe_no_outliers <- final_dataframe_lagged[-outliers_df$Index, ]
+# Supprimer les outliers
+final_dataframe_no_outliers <- final_dataframe_transformed[-outliers_df$Index, ]
 
-# Étape 11 : Sauvegarder les DataFrames et le tableau récapitulatif
+# Sauvegarder sans outliers
 write_xlsx(final_dataframe_no_outliers, "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Outliers.xlsx")
-write_xlsx(recap_outliers, "//Users/mehdifehri/Desktop/R/Données/Recap_Outliers.xlsx")
+write_xlsx(recap_outliers, "//Users/mehdifehri/Desktop/R/Données/Recap_Outliers_Original.xlsx")
 
-# Étape 12 : Afficher des informations sur le nombre d'observations supprimées
-initial_dim <- dim(final_dataframe_lagged)
-final_dim <- dim(final_dataframe_no_outliers)
-cat("Dimensions initiales :", initial_dim[1], "x", initial_dim[2], "\n")
-cat("Dimensions finales (sans outliers) :", final_dim[1], "x", final_dim[2], "\n")
-cat("Nombre d'observations supprimées :", initial_dim[1] - final_dim[1], "\n")
+cat("Outliers traités. Dimensions finales (sans outliers) :",
+    nrow(final_dataframe_no_outliers), "x", ncol(final_dataframe_no_outliers), "\n")
 
 
 ##############################################################
-# DÉTECTION DES ALIAS (COLINÉARITÉS PARFAITES)
+# PARTIE 2 : DÉTECTION DES ALIAS (COLINÉARITÉ PARFAITE)
+# On part du fichier Final_Data_No_Outliers.xlsx généré ci-dessus
 ##############################################################
 
 library(readxl)
+library(dplyr)
 library(writexl)
 
-# Étape 1 : Charger le DataFrame sans outliers
+# Charger le DataFrame sans outliers
 final_dataframe_no_outliers <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Outliers.xlsx")
 
-# Étape 2 : Identifier les variables explicatives
-# On exclut 'fec' (variable dépendante) et 'Annee' (index temporel)
 variables_explicatives <- setdiff(names(final_dataframe_no_outliers), c("fec", "Annee"))
-
-# Étape 3 : Ajuster un modèle linéaire complet avec toutes les variables explicatives
 full_model <- lm(fec ~ ., data = final_dataframe_no_outliers[, c("fec", variables_explicatives)])
-
-# Étape 4 : Détecter les colinéarités parfaites avec la fonction alias()
 alias_results <- alias(full_model)
 
-# Étape 5 : Afficher les résultats d'alias
 print(alias_results)
 
-# Étape 6 : Déterminer les variables problématiques (colinéarité parfaite)
 problematic_vars <- rownames(alias_results$Complete)
 
-# Étape 7 : Si des variables problématiques sont détectées, les supprimer
 if (length(problematic_vars) > 0) {
-  final_dataframe_no_alias <- final_dataframe_no_outliers %>%
+  final_data_no_alias <- final_dataframe_no_outliers %>%
     select(-all_of(problematic_vars))
   
-  # Étape 8 : Sauvegarder le nouveau DataFrame sans alias
-  write_xlsx(final_dataframe_no_alias, "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Alias.xlsx")
+  # Sauvegarder sans alias
+  write_xlsx(final_data_no_alias, "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Alias.xlsx")
   
-  # Étape 9 : Sauvegarder la liste des variables problématiques
   problematic_vars_df <- data.frame(Variable = problematic_vars)
   write_xlsx(problematic_vars_df, "//Users/mehdifehri/Desktop/R/Données/Alias_Results.xlsx")
   
+  cat("Variables avec colinéarité parfaite supprimées :", problematic_vars, "\n")
 } else {
   cat("Aucune colinéarité parfaite détectée, aucune variable supprimée.\n")
+  # Même si aucune variable n’est supprimée, on crée tout de même final_data_no_alias = final_dataframe_no_outliers
+  final_data_no_alias <- final_dataframe_no_outliers
+  write_xlsx(final_data_no_alias, "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Alias.xlsx")
 }
+
+
+##############################################################
+# PARTIE 3 : ANALYSE DES VARIABLES EXPLICATIVES (CORRÉLATION, MDS, etc.)
+# On part du fichier Final_Data_No_Alias.xlsx généré ci-dessus
+##############################################################
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(writexl)
+library(ggplot2)
+library(reshape2)
+library(stats)
+library(igraph)
+library(factoextra)
+# library(Rtsne) # optionnel
+
+# Charger le DataFrame sans alias
+final_data_no_alias <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Alias.xlsx")
+
+# Sélectionner les variables explicatives
+data_expl <- final_data_no_alias %>%
+  select(-Annee, -fec)
+
+# Calculer la matrice de corrélation
+cor_mat <- cor(data_expl, use = "complete.obs")
+write_xlsx(as.data.frame(cor_mat), "//Users/mehdifehri/Desktop/R/Données/Correlation_Matrix_No_Dependent.xlsx")
+
+cat("Matrice de corrélation (sans variable dépendante) :\n")
+print(cor_mat)
+
+# Heatmap
+correlation_melted <- melt(cor_mat)
+heatmap_plot <- ggplot(correlation_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0,
+                       limit = c(-1, 1), space = "Lab", name = "Corrélation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(title = "Matrice de corrélation (sans variable dépendante)", x = "Variables", y = "Variables")
+
+print(heatmap_plot)
+ggsave("//Users/mehdifehri/Desktop/R/Données/Correlation_Heatmap.png", plot = heatmap_plot,
+       width = 10, height = 8, dpi = 300)
+
+cat("Matrice de corrélation affichée, sauvegardée en Excel et heatmap PNG.\n")
+
+# Identification des paires de variables fortement corrélées
+corr_threshold <- 0.9
+high_corr_pairs <- correlation_melted %>%
+  filter(value > corr_threshold & Var1 != Var2) %>%
+  arrange(desc(value)) %>%
+  mutate(pair = paste0(pmin(as.character(Var1), as.character(Var2)), "-", pmax(as.character(Var1), as.character(Var2)))) %>%
+  distinct(pair, .keep_all = TRUE) %>%
+  select(-pair)
+
+cat("Paires de variables avec corrélation >", corr_threshold, ":\n")
+print(high_corr_pairs)
+write_xlsx(high_corr_pairs, "//Users/mehdifehri/Desktop/R/Données/High_Correlation_Pairs.xlsx")
+
+variable_counts <- high_corr_pairs %>%
+  select(Var1, Var2) %>%
+  pivot_longer(cols = everything(), values_to = "Variable") %>%
+  group_by(Variable) %>%
+  summarise(Frequency = n()) %>%
+  arrange(desc(Frequency))
+
+# Afficher les variables les plus fréquentes
+print(variable_counts)
+
+
+##############################################################
+# 4. VISUALISATION DE LA STRUCTURE DES VARIABLES (DENDRO, MDS, RÉSEAU)
+##############################################################
+
+# Création d'une matrice de distance basée sur 1 - |corr|
+dist_mat <- as.dist(1 - abs(cor_mat))
+
+### Dendrogramme
+hc <- hclust(dist_mat, method = "complete")
+pdf("//Users/mehdifehri/Desktop/R/Données/Dendrogramme.pdf", width = 10, height = 8)
+plot(hc, main = "Dendrogramme des variables", xlab = "Variables", sub = "")
+abline(h = 0.2, col = "red", lty = 2)  # Ajuster le seuil si nécessaire
+dev.off()
+cat("Dendrogramme sauvegardé en PDF.\n")
+
+### MDS (Multi-Dimensional Scaling)
+mds_res <- cmdscale(dist_mat, k = 2)
+mds_df <- data.frame(
+  Dim1 = mds_res[,1],
+  Dim2 = mds_res[,2],
+  Variable = rownames(mds_res)
+)
+
+mds_plot <- ggplot(mds_df, aes(x = Dim1, y = Dim2, label = Variable)) +
+  geom_point() +
+  geom_text(vjust = -0.5, size = 3) +
+  labs(title = "Représentation MDS des variables", x = "Dimension 1", y = "Dimension 2") +
+  theme_minimal()
+
+print(mds_plot)
+ggsave("//Users/mehdifehri/Desktop/R/Données/MDS_Plot.pdf", plot = mds_plot, width = 10, height = 8)
+cat("MDS plot affiché et sauvegardé en PDF.\n")
+
+### Graphe de réseau
+high_corr <- melt(cor_mat) %>%
+  filter(value > corr_threshold & Var1 != Var2) %>%
+  mutate(pair = paste(pmin(as.character(Var1), as.character(Var2)),
+                      pmax(as.character(Var1), as.character(Var2)), sep = "-")) %>%
+  distinct(pair, .keep_all = TRUE) %>%
+  select(-pair)
+
+g <- graph_from_data_frame(high_corr[, c("Var1", "Var2")], directed = FALSE)
+
+plot(g,
+     layout = layout_with_fr(g),
+     vertex.size = 5,
+     vertex.label.cex = 0.7,
+     main = paste("Graphe de réseau des variables (corr >", corr_threshold, ")"))
+cat("Graphe de réseau affiché.\n")
+
+
+##################################################################### Test VIF ########################
+
+# Charger les bibliothèques nécessaires
+library(readxl)
+library(car)  # Pour le calcul du VIF
+library(writexl)
+library(dplyr)
+
+# Charger le dernier DataFrame
+final_data_no_alias <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_No_Alias.xlsx")
+
+# Identifier les variables explicatives
+variables_explicatives <- setdiff(names(final_data_no_alias), c("fec", "Annee"))
+
+# Créer une copie des données pour effectuer les modifications
+data_for_vif <- final_data_no_alias
+
+# Définir le seuil de VIF
+vif_threshold <- 10
+
+# Initialiser les listes pour stocker les résultats
+iteration_results <- list()
+removed_variables <- data.frame(Iteration = integer(), Variable = character(), VIF_Value = numeric(), stringsAsFactors = FALSE)
+
+# Boucle itérative pour supprimer les variables avec VIF élevé
+iteration <- 1
+while (TRUE) {
+  cat("\n--- Itération", iteration, "---\n")
+  
+  # Ajuster un modèle linéaire avec les variables explicatives restantes
+  current_model <- lm(fec ~ ., data = data_for_vif[, c("fec", variables_explicatives)])
+  
+  # Calculer le VIF pour chaque variable explicative
+  vif_values <- vif(current_model)
+  
+  # Afficher les VIF actuels
+  cat("Facteurs d'inflation de la variance (VIF) actuels :\n")
+  print(vif_values)
+  
+  # Sauvegarder les résultats de l'itération
+  iteration_results[[iteration]] <- data.frame(Variable = names(vif_values), VIF = vif_values, Iteration = iteration)
+  
+  # Identifier les variables avec un VIF supérieur au seuil
+  high_vif_vars <- names(vif_values[vif_values > vif_threshold])
+  
+  # Vérifier s'il reste des variables avec un VIF élevé
+  if (length(high_vif_vars) == 0) {
+    cat("Toutes les variables ont un VIF <= ", vif_threshold, ". Fin de la boucle.\n")
+    break
+  }
+  
+  # Identifier la variable avec le VIF maximum
+  variable_to_remove <- high_vif_vars[which.max(vif_values[high_vif_vars])]
+  max_vif_value <- max(vif_values[high_vif_vars])
+  cat("Variable avec le VIF le plus élevé :", variable_to_remove, "(", max_vif_value, ")\n")
+  
+  # Ajouter la variable supprimée à la liste des variables supprimées
+  removed_variables <- rbind(removed_variables, data.frame(Iteration = iteration, Variable = variable_to_remove, VIF_Value = max_vif_value))
+  
+  # Supprimer cette variable des données et des variables explicatives
+  data_for_vif <- data_for_vif[, !names(data_for_vif) %in% variable_to_remove]
+  variables_explicatives <- setdiff(variables_explicatives, variable_to_remove)
+  
+  # Augmenter le compteur d'itérations
+  iteration <- iteration + 1
+}
+
+# Sauvegarder les données finales sans VIF élevé
+write_xlsx(data_for_vif, "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_High_VIF_Iterative.xlsx")
+cat("Les données finales après suppression des variables avec VIF > ", vif_threshold, " ont été sauvegardées.\n")
+
+# Sauvegarder les résultats des VIF à chaque itération
+all_iterations_vif <- bind_rows(iteration_results)
+write_xlsx(all_iterations_vif, "//Users/mehdifehri/Desktop/R/Données/Iterative_VIF_Results.xlsx")
+cat("Les résultats des VIF pour chaque itération ont été sauvegardés.\n")
+
+# Sauvegarder les variables supprimées et leurs VIF
+write_xlsx(removed_variables, "//Users/mehdifehri/Desktop/R/Données/Removed_Variables_VIF.xlsx")
+cat("Les variables supprimées avec leurs VIF ont été sauvegardées.\n")
+
+
+######################### Vérification des 4 +1 hypothèses de Gauss-Markov #########
+
+library(readxl)
+library(writexl)
+library(dplyr)
+library(lmtest)
+library(nortest)
+library(MASS)
+
+# Charger les données nettoyées
+fichier_donnees <- "//Users/mehdifehri/Desktop/R/Données/Final_Data_No_High_VIF_Iterative.xlsx"
+final_dataframe <- read_excel(fichier_donnees)
+
+# Vérifier la présence de la variable dépendante et des explicatives
+if (!"fec" %in% names(final_dataframe) || ncol(final_dataframe) < 2) {
+  stop("La colonne 'fec' est absente ou pas assez de variables explicatives.")
+}
+
+# Identifier les variables explicatives
+variables_explicatives <- setdiff(names(final_dataframe), c("fec", "Annee"))
+
+# Ajuster le modèle complet sans restrictions
+model_formula <- as.formula(paste("fec ~", paste(variables_explicatives, collapse = " + ")))
+full_model_without_restriction <- lm(model_formula, data = final_dataframe)
+residus <- resid(full_model_without_restriction)
+
+# Étape 1 : Résidus de moyenne nulle
+cat("\n### Hypothèse 1 : Résidus de moyenne nulle ###\n")
+mean_residuals <- mean(residus)
+std_error_residuals <- sd(residus) / sqrt(length(residus))
+t_stat <- mean_residuals / std_error_residuals
+p_value <- 2 * pt(-abs(t_stat), df = length(residus) - 1)
+cat("Résultats du test :\n")
+cat(paste("t-statistic:", t_stat, "p-value:", p_value, "\n"))
+if (p_value > 0.05) {
+  cat("H₀ est vérifiée : les résidus ont une moyenne nulle.\n")
+} else {
+  cat("H₀ est rejetée : les résidus n'ont pas une moyenne nulle.\n")
+}
+
+# Étape 2 : Indépendance entre résidus et variables explicatives
+cat("\n### Hypothèse 2 : Indépendance entre résidus et variables explicatives ###\n")
+results <- lapply(variables_explicatives, function(var) {
+  corr_test <- cor.test(final_dataframe[[var]], residus)
+  data.frame(Variable = var, Correlation = corr_test$estimate, P_value = corr_test$p.value,
+             Significant = corr_test$p.value <= 0.05)
+}) %>% bind_rows()
+cat("Résultats du test :\n")
+print(results)
+write_xlsx(results, "correlation_results.xlsx")
+cat("Les résultats ont été sauvegardés dans 'correlation_results.xlsx'.\n")
+if (any(results$Significant)) {
+  cat("Certaines variables explicatives sont corrélées aux résidus. L'hypothèse d'indépendance est rejetée.\n")
+} else {
+  cat("Aucune variable explicative n'est corrélée aux résidus. H₀ est vérifiée : indépendance respectée.\n")
+}
+
+# Étape 3 : Homoscédasticité
+cat("\n### Hypothèse 3 : Homoscédasticité ###\n")
+test_bp <- bptest(full_model_without_restriction)
+cat("Résultats du test de Breusch-Pagan :\n")
+print(test_bp)
+if (test_bp$p.value > 0.05) {
+  cat("H₀ est vérifiée : les résidus ont une variance constante (homoscédasticité).\n")
+} else {
+  cat("H₀ est rejetée : les résidus n'ont pas une variance constante (hétéroscédasticité).\n")
+}
+
+# Étape 4 : Absence d'autocorrélation
+cat("\n### Hypothèse 4 : Absence d'autocorrélation ###\n")
+test_dw <- dwtest(full_model_without_restriction)
+cat("Résultats du test de Durbin-Watson :\n")
+print(test_dw)
+if (test_dw$p.value > 0.05) {
+  cat("H₀ est vérifiée : il n'y a pas d'autocorrélation des résidus.\n")
+} else {
+  cat("H₀ est rejetée : il existe une autocorrélation des résidus.\n")
+}
+
+# Étape 5 : Normalité des résidus
+cat("\n### Hypothèse supplémentaire : Normalité des résidus ###\n")
+test_shapiro <- shapiro.test(residus)
+cat("Résultats du test de Shapiro-Wilk :\n")
+print(test_shapiro)
+if (test_shapiro$p.value > 0.05) {
+  cat("H₀ est vérifiée : les résidus suivent une distribution normale.\n")
+} else {
+  cat("H₀ est rejetée : les résidus ne suivent pas une distribution normale.\n")
+}
+
+# Visualisations des résidus
+par(mfrow = c(2, 2))  # Disposer les graphiques en 2x2
+
+# Résidus vs valeurs ajustées
+plot(fitted(full_model_without_restriction), residus, main = "Résidus vs valeurs ajustées",
+     xlab = "Valeurs ajustées", ylab = "Résidus", pch = 19, col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+# Résidus vs indices
+plot(1:length(residus), residus, main = "Résidus vs indices",
+     xlab = "Indice", ylab = "Résidus", pch = 19, col = "green")
+abline(h = 0, col = "red", lty = 2)
+
+# Histogramme des résidus
+hist(residus, breaks = 15, col = "gray", main = "Histogramme des résidus", xlab = "Résidus")
+
+# Q-Q plot des résidus
+qqnorm(residus, main = "Q-Q Plot des résidus")
+qqline(residus, col = "red")
+
+# Test de Box-Cox
+cat("\n### Test de Box-Cox ###\n")
+boxcox_results <- boxcox(full_model_without_restriction, lambda = seq(-2, 2, by = 0.1))
+lambda_optimal <- boxcox_results$x[which.max(boxcox_results$y)]
+cat("Lambda optimal :", lambda_optimal, "\n")
+
+
+######################################################################
+### Transformation logarithmique et nouveau modèle ###
+#####################################################################
+
+# Vérifier si la variable dépendante contient des valeurs non positives
+if (any(final_dataframe$fec <= 0)) {
+  stop("La transformation logarithmique n'est pas possible : la variable 'fec' contient des valeurs non positives.")
+}
+
+# Transformation logarithmique de la variable dépendante (y)
+final_dataframe$log_fec <- log(final_dataframe$fec)
+
+# Création du modèle avec la variable log-transformée
+model_formula_log <- as.formula(paste("log_fec ~", paste(variables_explicatives, collapse = " + ")))
+full_model_base_log <- lm(model_formula_log, data = final_dataframe)
+
+cat("\n### Résumé du modèle 'full_model_base_log' ###\n")
+print(summary(full_model_base_log))
+
+### Tests de White et de Breusch-Pagan sur le nouveau modèle ###
+
+# Résidus du nouveau modèle
+residus_log <- resid(full_model_base_log)
+
+# Test de Breusch-Pagan
+cat("\n### Test de Breusch-Pagan sur 'full_model_base_log' ###\n")
+bp_test_log <- bptest(full_model_base_log)
+print(bp_test_log)
+if (bp_test_log$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée selon le test de Breusch-Pagan.\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée selon le test de Breusch-Pagan.\n")
+}
+
+# Test de White
+cat("\n### Test de White sur 'full_model_base_log' ###\n")
+white_test_log <- bptest(full_model_base_log, ~ fitted(full_model_base_log) + I(fitted(full_model_base_log)^2))
+print(white_test_log)
+if (white_test_log$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée (Test de White).\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée (Test de White).\n")
+}
+
+### Visualisations des résidus du modèle log-transformé ###
+
+# Réinitialiser les paramètres graphiques
+dev.off()  # Fermer toutes les fenêtres graphiques ouvertes
+
+# Disposition des graphiques en 2x2
+par(mfrow = c(2, 2))
+
+# Résidus vs valeurs ajustées
+plot(fitted(full_model_base_log), residus_log,
+     main = "Résidus vs valeurs ajustées (log)",
+     xlab = "Valeurs ajustées", ylab = "Résidus",
+     pch = 19, col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+# Résidus vs indices
+plot(1:length(residus_log), residus_log,
+     main = "Résidus vs indices (log)",
+     xlab = "Indice", ylab = "Résidus",
+     pch = 19, col = "green")
+abline(h = 0, col = "red", lty = 2)
+
+# Histogramme des résidus
+hist(residus_log, breaks = 15, col = "gray",
+     main = "Histogramme des résidus (log)",
+     xlab = "Résidus")
+
+# Q-Q plot des résidus
+qqnorm(residus_log, main = "Q-Q Plot des résidus (log)")
+qqline(residus_log, col = "red")
+
+# Revenir aux paramètres graphiques par défaut
+par(mfrow = c(1, 1))
+
+##################################################################################
+### Transformation double log ? ###
+#################################################################################
+# Vérifier si toutes les variables explicatives et la variable dépendante contiennent des valeurs positives
+non_positive_vars <- c()
+for (var in c("fec", variables_explicatives)) {
+  if (any(final_dataframe[[var]] <= 0)) {
+    non_positive_vars <- c(non_positive_vars, var)
+  }
+}
+
+if (length(non_positive_vars) > 0) {
+  stop(paste("La transformation logarithmique n'est pas possible pour les variables suivantes :",
+             paste(non_positive_vars, collapse = ", "), "car elles contiennent des valeurs non positives."))
+}
+
+### Transformation logarithmique pour toutes les variables ###
+# Transformation logarithmique de la variable dépendante (y) et des variables explicatives
+final_dataframe <- final_dataframe %>%
+  mutate(across(c(fec, all_of(variables_explicatives)), ~ log(.), .names = "log_{col}"))
+
+# Mettre à jour les variables explicatives pour inclure uniquement les versions log-transformées
+log_variables_explicatives <- paste0("log_", variables_explicatives)
+
+### Création du modèle double log ###
+model_formula_double_log <- as.formula(paste("log_fec ~", paste(log_variables_explicatives, collapse = " + ")))
+full_model_double_log <- lm(model_formula_double_log, data = final_dataframe)
+
+cat("\n### Résumé du modèle 'full_model_double_log' ###\n")
+print(summary(full_model_double_log))
+
+### Tests de White et de Breusch-Pagan sur le modèle double log ###
+# Résidus du modèle double log
+residus_double_log <- resid(full_model_double_log)
+
+# Test de Breusch-Pagan
+cat("\n### Test de Breusch-Pagan sur 'full_model_double_log' ###\n")
+bp_test_double_log <- bptest(full_model_double_log)
+print(bp_test_double_log)
+if (bp_test_double_log$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée selon le test de Breusch-Pagan.\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée selon le test de Breusch-Pagan.\n")
+}
+
+# Test de White
+cat("\n### Test de White sur 'full_model_double_log' ###\n")
+white_test_double_log <- bptest(full_model_double_log, ~ fitted(full_model_double_log) + I(fitted(full_model_double_log)^2))
+print(white_test_double_log)
+if (white_test_double_log$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée (Test de White).\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée (Test de White).\n")
+}
+
+### Visualisations des résidus du modèle double log ###
+# Réinitialiser les paramètres graphiques
+dev.off()  # Fermer toutes les fenêtres graphiques ouvertes
+
+# Disposition des graphiques en 2x2
+par(mfrow = c(2, 2))
+
+# Résidus vs valeurs ajustées
+plot(fitted(full_model_double_log), residus_double_log,
+     main = "Résidus vs valeurs ajustées (double log)",
+     xlab = "Valeurs ajustées", ylab = "Résidus",
+     pch = 19, col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+# Résidus vs indices
+plot(1:length(residus_double_log), residus_double_log,
+     main = "Résidus vs indices (double log)",
+     xlab = "Indice", ylab = "Résidus",
+     pch = 19, col = "green")
+abline(h = 0, col = "red", lty = 2)
+
+# Histogramme des résidus
+hist(residus_double_log, breaks = 15, col = "gray",
+     main = "Histogramme des résidus (double log)",
+     xlab = "Résidus")
+
+# Q-Q plot des résidus
+qqnorm(residus_double_log, main = "Q-Q Plot des résidus (double log)")
+qqline(residus_double_log, col = "red")
+
+# Revenir aux paramètres graphiques par défaut
+par(mfrow = c(1, 1))
+
+###############################################################
+#################################### Règlage problème Hétérosédasticité ##################
+###############################################################
+
+
+# Réinitialiser les paramètres graphiques
+dev.off()  # Fermer toutes les fenêtres graphiques ouvertes
+
+# Disposition des graphiques en 2x2
+par(mfrow = c(2, 2))
+
+
+#test avec erreur robust# 
+#Les variables explicatives qui restent importantes pour expliquer la variable dépendante, 
+#même après avoir corrigé l’hétéroscédasticité
+library(sandwich)
+library(lmtest)
+coeftest(full_model_without_restriction, vcov = vcovHC(full_model_without_restriction, type = "HC1"))
+
+
+### 1. Analyse graphique des résidus ###
+
+## Résidus vs valeurs ajustées ##
+# Objectif : Détecter des éventails ou patterns dans la variance
+plot(fitted(full_model_without_restriction), resid(full_model_without_restriction),
+     main = "Résidus vs Valeurs ajustées",
+     xlab = "Valeurs ajustées (fitted values)", ylab = "Résidus",
+     pch = 19, col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+## Histogramme des résidus ##
+# Objectif : Vérifier la distribution des résidus
+hist(resid(full_model_without_restriction), breaks = 15, col = "gray",
+     main = "Histogramme des résidus",
+     xlab = "Résidus")
+
+## Résidus vs variables explicatives ##
+# Objectif : Identifier des relations spécifiques avec des variables
+for (var in names(final_dataframe)[-which(names(final_dataframe) %in% c("fec", "Annee"))]) {
+  plot(final_dataframe[[var]], resid(full_model),
+       main = paste("Résidus vs", var),
+       xlab = var, ylab = "Résidus",
+       pch = 19, col = "blue")
+  abline(h = 0, col = "red", lty = 2)
+}
+
+
+######### TEST COMBINÉES ##########
+### 2. Test de Breusch-Pagan ###
+# Objectif : Tester si la variance des résidus dépend des valeurs ajustées
+cat("### Test de Breusch-Pagan ###\n")
+bp_test <- bptest(full_model_without_restriction)
+print(bp_test)
+
+# Vérification de l'hypothèse nulle
+if (bp_test$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée selon le test de Breusch-Pagan.\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée selon le test de Breusch-Pagan.\n")
+}
+
+### 3. Test de White ###
+# Objectif : Détecter des relations non linéaires dans les variances
+cat("\n### Test de White ###\n")
+white_test <- bptest(full_model_without_restriction, ~ fitted(full_model_without_restriction) + I(fitted(full_model_without_restriction)^2))
+print(white_test)
+
+# Vérification de l'hypothèse nulle
+if (white_test$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée selon le test de White.\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée selon le test de White.\n")
+}
+
+### 4. Interprétation combinée ###
+# Interpréter les résultats en fonction des deux tests
+cat("\n### Interprétation des résultats ###\n")
+
+if (bp_test$p.value > 0.05 & white_test$p.value > 0.05) {
+  cat("Les deux tests indiquent que l'hypothèse d'homoscédasticité est vérifiée. Aucun problème détecté.\n")
+} else if (bp_test$p.value <= 0.05 & white_test$p.value > 0.05) {
+  cat("Le test de Breusch-Pagan détecte une hétéroscédasticité linéaire, mais le test de White ne trouve pas d'hétéroscédasticité complexe.\n")
+  cat("Cela signifie que la variance des résidus dépend probablement de manière linéaire des valeurs ajustées.\n")
+} else if (bp_test$p.value > 0.05 & white_test$p.value <= 0.05) {
+  cat("Le test de Breusch-Pagan n'indique pas d'hétéroscédasticité linéaire, mais le test de White détecte une hétéroscédasticité non linéaire.\n")
+  cat("Cela suggère une relation plus complexe dans la variance des résidus (non linéaire ou interactions).\n")
+} else {
+  cat("Les deux tests rejettent l'hypothèse d'homoscédasticité.\n")
+  cat("Cela indique que la variance des résidus dépend à la fois de relations linéaires et non linéaires avec les valeurs ajustées.\n")
+}
+
+
+### 5. Test de transformations ###
+# Objectif : Tester différentes transformations pour réduire l'hétéroscédasticité
+
+# 1. Test de Box-Cox
+cat("### Test de Box-Cox ###\n")
+boxcox_results <- boxcox(full_model_without_restriction, lambda = seq(-2, 2, by = 0.1))
+lambda_optimal <- boxcox_results$x[which.max(boxcox_results$y)]
+cat("Lambda optimal :", lambda_optimal, "\n")
+
+# Interprétation du lambda
+if (lambda_optimal == 0) {
+  cat("Recommandation : Transformation logarithmique de la variable dépendante (log(y)).\n")
+} else if (lambda_optimal > 0) {
+  cat("Recommandation : Transformation puissance (y^", lambda_optimal, ").\n")
+} else {
+  cat("Recommandation : Transformation inverse (1 / y).\n")
+}
+
+# 2. Tester les transformations courantes
+cat("\n### Comparaison des transformations ###\n")
+
+# Fonction pour ajuster un modèle avec une transformation et calculer R² ajusté
+test_transformations <- function(data, y_var, formula, transformations) {
+  results <- data.frame(Transformation = character(), Adjusted_R2 = numeric(), stringsAsFactors = FALSE)
+  
+  for (trans in names(transformations)) {
+    # Appliquer la transformation
+    data$y_trans <- transformations[[trans]](data[[y_var]])
+    
+    # Ajuster le modèle avec la variable transformée
+    model <- lm(y_trans ~ ., data = data)
+    
+    # Sauvegarder le R² ajusté
+    results <- rbind(results, data.frame(Transformation = trans, Adjusted_R2 = summary(model)$adj.r.squared))
+  }
+  
+  return(results)
+}
+
+# Définir les transformations courantes
+transformations <- list(
+  "None" = function(y) y,
+  "Logarithm" = function(y) ifelse(y > 0, log(y), NA),
+  "Square Root" = function(y) ifelse(y >= 0, sqrt(y), NA),
+  "Inverse" = function(y) ifelse(y != 0, 1 / y, NA),
+  "Square" = function(y) y^2
+)
+
+# Tester les transformations
+y_var <- "fec"  # Nom de la variable dépendante
+transform_results <- test_transformations(final_dataframe, y_var, formula(full_model), transformations)
+
+# Afficher les résultats
+print(transform_results)
+
+# Recommandation basée sur le R² ajusté
+best_transformation <- transform_results[which.max(transform_results$Adjusted_R2), ]
+cat("\nMeilleure transformation basée sur le R² ajusté :", best_transformation$Transformation, 
+    "avec un R² ajusté de", best_transformation$Adjusted_R2, "\n")
+
+#################################################################################
+############################## SOLUTION ################################################################
+############################################################
+
+### 1. Vérification de la colinéarité ###
+library(car)
+library(lmtest)
+
+cat("\n### Vérification de la colinéarité avec le VIF ###\n")
+vif_values <- vif(full_model_without_restriction)
+print(vif_values)
+
+# Identifier les variables avec VIF > 10
+high_vif_vars <- names(vif_values[vif_values > 10])
+if (length(high_vif_vars) > 0) {
+  cat("Variables avec une forte colinéarité :", paste(high_vif_vars, collapse = ", "), "\n")
+} else {
+  cat("Aucune variable avec une forte colinéarité détectée.\n")
+}
+
+### 2. Vérification des outliers ###
+cat("\n### Vérification des outliers ###\n")
+# Résidus standardisés
+residuals_std <- rstandard(full_model_without_restriction)
+
+# Visualisation des résidus standardisés
+plot(residuals_std, main = "Résidus standardisés",
+     xlab = "Index", ylab = "Résidus standardisés", pch = 19, col = "blue")
+abline(h = c(-2, 2), col = "red", lty = 2)
+
+# Identifier les points influents
+outliers <- which(abs(residuals_std) > 2)
+if (length(outliers) > 0) {
+  cat("Outliers détectés aux indices :", paste(outliers, collapse = ", "), "\n")
+} else {
+  cat("Aucun outlier détecté.\n")
+}
+
+### 3. Simplification du modèle ###
+cat("\n### Simplification du modèle ###\n")
+if (length(high_vif_vars) > 0) {
+  cat("Création d'un modèle réduit sans variables avec VIF élevé...\n")
+  
+  # Supprimer les variables avec VIF élevé
+  reduced_vars <- setdiff(names(final_dataframe), c(high_vif_vars, "fec", "Annee"))
+  formula_reduced <- as.formula(paste("fec ~", paste(reduced_vars, collapse = " + ")))
+  
+  # Modèle réduit
+  reduced_model <- lm(formula_reduced, data = final_dataframe)
+  cat("Résumé du modèle réduit :\n")
+  print(summary(reduced_model))
+} else {
+  cat("Pas besoin de simplifier le modèle : aucune variable avec VIF élevé détectée.\n")
+  reduced_model <- full_model  # Si aucun changement, on garde le modèle initial
+}
+
+### 4. Vérification après simplification ###
+cat("\n### Tests après simplification ###\n")
+
+# Test de Breusch-Pagan
+cat("\n### Test de Breusch-Pagan ###\n")
+bp_test <- bptest(reduced_model)
+print(bp_test)
+if (bp_test$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée selon le test de Breusch-Pagan.\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée selon le test de Breusch-Pagan.\n")
+}
+
+# Test de White
+cat("\n### Test de White ###\n")
+white_test <- bptest(reduced_model, ~ fitted(reduced_model) + I(fitted(reduced_model)^2))
+print(white_test)
+if (white_test$p.value > 0.05) {
+  cat("H₀ : Homoscédasticité vérifiée (Test de White).\n")
+} else {
+  cat("H₀ rejetée : Hétéroscédasticité détectée (Test de White).\n")
+}
+
+### Résumé final ###
+cat("\n### Résumé ###\n")
+cat("- Variables avec VIF élevé : ", ifelse(length(high_vif_vars) > 0, paste(high_vif_vars, collapse = ", "), "Aucune"), "\n")
+cat("- Outliers détectés : ", ifelse(length(outliers) > 0, paste(outliers, collapse = ", "), "Aucun"), "\n")
+cat("- Résultats du test de Breusch-Pagan : ", ifelse(bp_test$p.value > 0.05, "Homoscédasticité vérifiée", "Hétéroscédasticité détectée"), "\n")
+cat("- Résultats du test de White : ", ifelse(white_test$p.value > 0.05, "Homoscédasticité vérifiée", "Hétéroscédasticité détectée"), "\n")
+
+
+
+
+
