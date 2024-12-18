@@ -1,5 +1,5 @@
 ---
-title: "Determinants de la fécondité"
+title: "Determinants de la baisse des naissances en France de 1991 à 2019"
 output: html_document
 author:
   - name : "NDAYA NSABUA Niclette"
@@ -10,13 +10,52 @@ author:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(writexl)
+
+data <- read_excel("C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data R Ajustée.xlsx") %>%
+  rename_with(~ gsub("-", "_", .), everything()) %>%
+  select(-fem, -sco_jeune, -pop, -parc_logement, -viedans5, -acceuilenf, -agemat,)
+
 ```
 
 ## Introduction
 ### A. Choix de la variable dépendante
+En 2023, 678.000 enfants sont nés en France, c'est le chiffre le plus faibe depuis 1938 (hors période de guerre).
+
+Cette baisse de la natalité est devenue un sujet central au point où Emmanuel Macron parle de la nécéssité d'un *"réarmement démographique"* pour la France. Nous avons donc décidé d'étudier cette question et de tenter de déterminer **les déterminants de cette baisse de la natalité**.
+
+Nous nous sommes tout d'abord interessés au **taux de natalité**, c'est à dire le nombre de naissance rapporté à la population. Cependant, une première regression a mis en évidence que la majeure partie de cette variable est déterminée par des variables démographiques.
+
+Nous avons donc décidé de prendre le **taux de fécondité**, qui correspond au nombre de naissances sur le nombre de femmes en âge de procréer.
+
+```{r fec, echo=FALSE, warning=FALSE}
+print(
+  ggplot(data, aes_string(x = "Temps", y = "fec")) +
+    geom_line(color = "blue") +
+    labs(title = paste("Variation du taux de fécondité de 1991 à 2020"), x = "Temps", y = "fec")
+)
+```
 
 ### B. Les variables explicatives
+Nous nous sommes d'abord concertés pour déterminer toutes les varaibles qui pourraient potentiellement expliquer ou être corrélées avec le taux de fécondité, organisées en 5 catégories :
 
+  - Facteurs socio-culturels
+  
+  - Facteurs démographiques et biologiques
+  
+  - Facteurs économiques et politiques
+  
+  - Facteurs liés au travail et à l'éducation
+  
+  - Facteurs individuels et comportementaux
+
+Nous avons réuni 37 variables variables.
+
+*(mettre la présentation des variables ici mais on les a pas décidées encore)*
 ## II. Premier traitement de nos variables explicatives
 
 ## III. Tri des variables 
