@@ -57,7 +57,39 @@ Nous avons réuni 37 variables variables.
 
 *(mettre la présentation des variables ici mais on les a pas décidées encore)*
 ## II. Premier traitement de nos variables explicatives
+### II.1. Interpolation linéaire des années (1991 - 2019) et création des variables décalées `lag`
 
+Nous avons régularisé la variable temps en générant une séquence trimestrielle couvrant la période 1991-2019. Les valeurs manquantes des variables numériques ont été complétées à l’aide d’une interpolation linéaire, permettant d’estimer les données manquantes en se basant sur les observations existantes. Cette étape garantit un jeu de données uniforme sur toute la période. 
+
+Ensuite, nous avons utilisé une fonction `lag` pour créer des variables décalées, en considérant que la natalité à une période donnée *(t)* est influencée par les politiques familiales et son propre niveau à la période précédente *(t-1)*. Cette hypothèse repose sur le fait qu’une gestation dure environ **9 mois**, ce qui implique un effet différé des facteurs explicatifs d’une année sur les naissances de l'année suivante 
+
+``` 
+# Interpolation trimestrielle et création des variables décalées (lags)
+data_clean <- data %>%
+  complete(Temps = seq(min(Temps), max(Temps), by = 0.25)) %>%
+  mutate(across(all_of(numeric_cols),
+                ~ approx(Temps[!is.na(.)], .[!is.na(.)], xout = Temps)$y)) %>%
+  arrange(Temps) %>%
+  mutate(across(setdiff(numeric_cols, "fec"), ~ lag(., n = 4), .names = "lag_{col}")) %>%
+  drop_na(starts_with("lag_"))
+```  
+
+### II.2. Création d’un jeu de données sans les outliers et tableau récapitulatif 
+
+Nous créons un nouveau jeu de données, `data_work2`, en supprimant les observations identifiées comme outliers, garantissant un ensemble de données nettoyées et prêtes pour les analyses.
+En complément,un tableau récapitulatif liste les observations extrêmes avec leur période `(Temps)`, leur valeur de fécondité `(fec)`, et leurs résidus standardisés `(Std_Resid)`.
+
+```
+# Étape 6 : Créer un nouveau DataFrame sans les outliers (`data_work2`)
+data_work2 <- data_work1 %>%
+  mutate(Index = seq_len(nrow(data_work1))) %>%
+  filter(!Index %in% outliers_standardized_df$Index) %>%
+  select(-Index)
+
+# Étape 7 : Tableau récapitulatif des outliers
+recap_outliers <- outliers_standardized_df %>%
+  select(Temps, fec, Std_Resid)
+```   
 ## III. Tri des variables 
 
 ## IV. Première regression
