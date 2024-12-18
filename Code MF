@@ -118,7 +118,7 @@ final_dataframe_lagged <- final_dataframe %>%
 write_xlsx(final_dataframe_lagged, "//Users/mehdifehri/Desktop/R/Données/Final_Data_Lagged.xlsx")
 
 
-################################################################################## DETECTION DES OUTLIERS
+########################################### DETECTION DES OUTLIERS
 
 # Charger les bibliothèques nécessaires
 library(dplyr)
@@ -155,7 +155,7 @@ final_dim <- dim(final_dataframe_no_outliers)
 head(final_dataframe_no_outliers)
 
 
-################################################################@@@@@@@@@@@@@ DETECTION DES ALIAS
+##################################### DETECTION DES ALIAS
 
 # Charger les bibliothèques nécessaires
 library(readxl)
@@ -206,7 +206,7 @@ if (length(problematic_vars) > 0) {
 }
 
 
-#########################@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ colinéarité ? 
+######################### Colinéarité ? 
 
 library(readxl)
 library(ggplot2)
@@ -287,7 +287,7 @@ write_xlsx(high_corr_pairs, "//Users/mehdifehri/Desktop/R/Données/High_Correla
 # Message de confirmation
 message("Paires de variables corrélées (corrélation > 0.9) identifiées et sauvegardées dans High_Correlation_Pairs.xlsx.")
 
-##########################SUPPRESSION DES VARIABLES LES PLUS CORRELEES ######################
+########################## SUPPRESSION DES VARIABLES LES PLUS CORRELEES
 
 library(readxl)
 library(dplyr)
@@ -327,7 +327,7 @@ write_xlsx(final_data_updated, "//Users/mehdifehri/Desktop/R/Données/Final_Dat
 # Message de confirmation
 message("Les variables spécifiées ont été supprimées (si trouvées). Données ajustées sauvegardées dans 'Final_Data_Updated.xlsx'.")
 
-############## VERIFIER AMELIORAITON ########################
+############## VERIFIER AMELIORAITON 
 
 # Charger le fichier mis à jour
 final_data_updated <- read_excel("//Users/mehdifehri/Desktop/R/Données/Final_Data_Updated.xlsx")
@@ -383,7 +383,7 @@ ggsave("//Users/mehdifehri/Desktop/R/Données/Updated_Correlation_Heatmap.png",
 message("Matrice de corrélation mise à jour affichée, sauvegardée en Excel et en tant que heatmap PNG.")
 message("Paires corrélées (corrélation > 0.9) sauvegardées dans 'High_Correlation_Pairs_Updated.xlsx'.")
 
-##################################################################### Test VIF
+############################## Test VIF
 
 # Charger les bibliothèques nécessaires
 library(readxl)
