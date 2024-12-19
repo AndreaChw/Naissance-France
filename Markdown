@@ -53,7 +53,7 @@ Nous nous sommes d'abord concertés pour déterminer toutes les varaibles qui po
   
   - Facteurs individuels et comportementaux
 
-Nous avons réuni 37 variables variables.
+Nous avons réuni 37 variables.
 
 *(mettre la présentation des variables ici mais on les a pas décidées encore)*
 ## II. Premier traitement de nos variables explicatives
