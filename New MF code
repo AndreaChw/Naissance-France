@@ -1,4 +1,4 @@
-#coode simplifié
+#code simplifié
 
 library(readxl)
 library(dplyr)
