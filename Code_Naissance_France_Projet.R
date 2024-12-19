@@ -15,7 +15,10 @@ cat("Chargement des données...\n")
 data <- read_excel("//Users/mehdifehri/Desktop/R/Données/Data R Ajustée.xlsx") %>%
   rename_with(~ gsub("-", "_", .), everything()) %>%
   # Suppression de certaines colonnes non nécessaires
-  select(-fem, -sco_jeune, -pop, -parc_logement, -viedans5, -acceuilenf, -agemat)
+  select(-fem, -sco_jeune, -pop, -parc_logement, -viedans5, -acceuilenf, -agemat, -solo, -loyers, 
+         -tailleMenage, -consoalcool, -opi_surpoids, - opi_nervosite, -opi_depression, -chomagefem, -opi_famille,
+         -inegalité_w_privée, -synthé_Oiseau, -tx_emploifem, -depseniors, -pib_hab, -wage_h, -opi_work_fem,
+         -lt_interest_rate,-cadre_vie,-opi_guerre, -opi_amelio_niv_vie, -opi_violence,)
 
 cat("Les colonnes spécifiées ont été supprimées avec succès.\n")
 
@@ -446,7 +449,7 @@ ggsave("//Users/mehdifehri/Desktop/R/Code Final Fec/Correlation_Heatmap_Data_Wor
 cat("Matrice de corrélation affichée, sauvegardée en Excel et heatmap PNG.\n")
 
 # Identification des paires de variables fortement corrélées
-corr_threshold <- 0.7
+corr_threshold <- 0.5
 high_corr_pairs <- correlation_melted %>%
   filter(value > corr_threshold & Var1 != Var2) %>%
   arrange(desc(value)) %>%
@@ -518,7 +521,7 @@ g <- graph_from_data_frame(high_corr[, c("Var1", "Var2")], directed = FALSE)
 plot(g,
      layout = layout_with_fr(g),
      vertex.size = 5,
-     vertex.label.cex = 0.7,
+     vertex.label.cex = 0.5,
      main = paste("Graphe de réseau des variables (corr >", corr_threshold, ")"))
 cat("Graphe de réseau affiché.\n")
 
@@ -556,7 +559,7 @@ variables_explicatives <- setdiff(names(data_work3), c("fec", "Temps"))
 data_for_vif <- data_work3
 
 # Définir le seuil de VIF
-vif_threshold <- 30
+vif_threshold <- 1500
 
 # Initialiser les listes pour stocker les résultats
 iteration_results <- list()
@@ -622,7 +625,7 @@ write_xlsx(data_work4, "//Users/mehdifehri/Desktop/R/Code Final Fec/Data_work4.x
 cat("Le fichier a été sauvegardé avec succès.\n")
 
 
-rm(all_iterations_vif)
+
 rm(current_model)
 rm(data_work3)
 rm(iteration_results)
@@ -753,12 +756,12 @@ library(dplyr)
 # Modèle final et visualisation des résidus
 #############################################################
 
-datawork4 <- read_xlsx("//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work4.xlsx")
-variables_explicatives_ols <- setdiff(colnames(datawork4), c("Temps", "fec"))
+data_work4_log <- read_xlsx("//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work4_log.xlsx")
+variables_explicatives_ols <- setdiff(colnames(data_work4_log), c("Temps", "fec"))
 formule_ols <- as.formula(paste("fec ~", paste(variables_explicatives_ols, collapse = " + ")))
 
 # Ajustement du modèle de régression
-model_final <- lm(formule_ols, data = datawork4)
+model_final <- lm(formule_ols, data = data_work4_log)
 
 # Extraction des résidus
 residus <- residuals(model_final)
