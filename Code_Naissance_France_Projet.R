@@ -767,7 +767,7 @@ model_final <- lm(as.formula(paste("fec ~", paste(variables_explicatives_ols, co
 residus <- residuals(model_final)
 
 # Seuil pour les outliers (par exemple, 1.5 fois l'écart-type des résidus)
-threshold <- 1.5 * sd(residus)
+threshold <- 2 * sd(residus)
 
 # Suppression des outliers
 data_work4_log_out <- data_work4_log %>%
@@ -1742,108 +1742,7 @@ if (bp_test$p.value > 0.05) {
   cat("Conclusion : H0 rejetée. Les résidus présentent une hétéroscédasticité significative.\n")
 }
 
+################################
+################# FIN ######################
+########################
 
-####################################################
-############### SOLUTION FINALE ####################
-####################################################
-
-library(sandwich)
-library(lmtest)
-
-cat("\n--- Régression avec correction des erreurs robustes de White ---\n")
-
-# Modèle OLS corrigé (intégrant éventuellement les résidus d'ARIMA)
-model_final_corrige <- lm(formule_ols, data = data_work_final_auto)
-
-# Calcul des erreurs robustes de White
-vcov_white <- vcovHC(model_final_corrige, type = "HC0")
-
-# Résumé des coefficients corrigés
-coeftest_results_white <- coeftest(model_final_corrige, vcov = vcov_white)
-
-# Affichage des résultats
-cat("\n--- Résultats de la régression avec erreurs corrigées (White) ---\n")
-print(coeftest_results_white)
-
-####################################################
-### Comparaison avant et après correction ###
-####################################################
-
-cat("\n--- Comparaison avant et après correction ---\n")
-
-# Résultats avant correction
-summary_before <- summary(model_final)
-coefficients_before <- summary_before$coefficients
-
-# Résultats après correction
-coefficients_after <- coeftest_results_white
-
-# Création d'un tableau comparatif
-comparison <- data.frame(
-  Variable = rownames(coefficients_before),
-  Coefficient_Before = coefficients_before[, 1],
-  Std_Error_Before = coefficients_before[, 2],
-  P_Value_Before = coefficients_before[, 4],
-  Coefficient_After = coefficients_after[, 1],
-  Std_Error_After = coefficients_after[, 2],
-  P_Value_After = coefficients_after[, 4]
-)
-
-# Ajouter une colonne pour identifier les changements de significativité
-comparison$Significance_Before <- comparison$P_Value_Before < 0.05
-comparison$Significance_After <- comparison$P_Value_After < 0.05
-
-# Filtrer les variables ayant changé de significativité
-changed_significance <- subset(comparison, Significance_Before != Significance_After)
-
-# Afficher les tableaux
-cat("\n--- Résultats Comparatifs ---\n")
-print(comparison)
-
-cat("\n--- Variables Ayant Changé de Significativité ---\n")
-print(changed_significance)
-
-####################################################
-### Test de Breusch-Pagan avec erreurs robustes ###
-####################################################
-
-library(lmtest)
-
-cat("\n--- Test de Breusch-Pagan pour vérifier l'hétéroscédasticité ---\n")
-
-# Effectuer le test de Breusch-Pagan standard
-bp_test_final <- bptest(model_final_corrige)
-
-# Résultats du test standard
-cat("Statistique du test Breusch-Pagan :", round(bp_test_final$statistic, 4), "\n")
-cat("Degrés de liberté :", bp_test_final$parameter, "\n")
-cat("P-value :", round(bp_test_final$p.value, 4), "\n")
-
-# Interprétation standard
-if (bp_test_final$p.value > 0.05) {
-  cat("Conclusion : H0 acceptée. L'hétéroscédasticité est absente (standard).\n")
-} else {
-  cat("Conclusion : H0 rejetée. L'hétéroscédasticité persiste (standard).\n")
-}
-
-
-####################################################
-### Test de Breusch-Pagan avec erreurs robustes ###
-####################################################
-
-# Test de Breusch-Pagan avec erreurs robustes
-residuals_squared <- residuals(model_final_corrige)^2
-fitted_values <- fitted(model_final_corrige)
-
-bp_test_robuste <- summary(lm(residuals_squared ~ fitted_values))
-p_value <- pf(bp_test_robuste$fstatistic[1], 
-              bp_test_robuste$fstatistic[2], 
-              bp_test_robuste$fstatistic[3], 
-              lower.tail = FALSE)
-
-# Résultat
-if (p_value > 0.05) {
-  cat("H0 validée : Présence d'homoscédasticité.\n")
-} else {
-  cat("H0 rejetée : Hétéroscédasticité détectée.\n")
-}
