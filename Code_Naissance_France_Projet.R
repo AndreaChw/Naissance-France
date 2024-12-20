@@ -1612,25 +1612,24 @@ if (kpss_test$p.value > 0.05) {
 
 
 ########################################################
-### Ajustement d'un modèle ARIMA sur les résidus ###
+### Ajustement d'un modèle ARIMA(4,0,0) sur les résidus ###
 ########################################################
 
-cat("\n--- Ajustement d'un modèle ARIMA ---\n")
+cat("\n--- Ajustement du modèle ARIMA(4,0,0) ---\n")
 
-# Utilisation d'auto.arima pour identifier un modèle approprié
-arima_model <- auto.arima(
+# Ajustement du modèle ARIMA(4,0,0)
+arima_model_400 <- arima(
   residuals_final,
-  seasonal = FALSE, # Pas de saisonnalité
-  stepwise = TRUE,  # Recherche rapide
-  approximation = FALSE # Recherche exacte
+  order = c(4, 0, 0),  # ARIMA(p=4, d=0, q=0)
+  include.mean = TRUE  # Inclure une constante si nécessaire
 )
 
 # Résumé du modèle ARIMA
-cat("Résumé du modèle ARIMA ajusté :\n")
-print(summary(arima_model))
+cat("\nRésumé du modèle ARIMA(4,0,0) :\n")
+print(summary(arima_model_400))
 
 # Extraction des résidus corrigés
-arima_residuals <- residuals(arima_model)
+arima_residuals <- residuals(arima_model_400)
 
 ########################################################
 ### Vérification des résidus corrigés ###
@@ -1751,20 +1750,20 @@ if (bp_test$p.value > 0.05) {
 library(sandwich)
 library(lmtest)
 
-cat("\n--- Régression avec correction des erreurs (Newey-West) ---\n")
+cat("\n--- Régression avec correction des erreurs robustes de White ---\n")
 
 # Modèle OLS corrigé (intégrant éventuellement les résidus d'ARIMA)
 model_final_corrige <- lm(formule_ols, data = data_work_final_auto)
 
-# Calcul des erreurs robustes de Newey-West
-vcov_newey <- vcovHAC(model_final_corrige)
+# Calcul des erreurs robustes de White
+vcov_white <- vcovHC(model_final_corrige, type = "HC0")
 
 # Résumé des coefficients corrigés
-coeftest_results <- coeftest(model_final_corrige, vcov = vcov_newey)
+coeftest_results_white <- coeftest(model_final_corrige, vcov = vcov_white)
 
 # Affichage des résultats
-cat("\n--- Résultats de la régression avec erreurs corrigées ---\n")
-print(coeftest_results)
+cat("\n--- Résultats de la régression avec erreurs corrigées (White) ---\n")
+print(coeftest_results_white)
 
 ####################################################
 ### Comparaison avant et après correction ###
@@ -1777,7 +1776,7 @@ summary_before <- summary(model_final)
 coefficients_before <- summary_before$coefficients
 
 # Résultats après correction
-coefficients_after <- coeftest_results
+coefficients_after <- coeftest_results_white
 
 # Création d'un tableau comparatif
 comparison <- data.frame(
@@ -1804,5 +1803,47 @@ print(comparison)
 cat("\n--- Variables Ayant Changé de Significativité ---\n")
 print(changed_significance)
 
+####################################################
+### Test de Breusch-Pagan avec erreurs robustes ###
+####################################################
+
+library(lmtest)
+
+cat("\n--- Test de Breusch-Pagan pour vérifier l'hétéroscédasticité ---\n")
+
+# Effectuer le test de Breusch-Pagan standard
+bp_test_final <- bptest(model_final_corrige)
+
+# Résultats du test standard
+cat("Statistique du test Breusch-Pagan :", round(bp_test_final$statistic, 4), "\n")
+cat("Degrés de liberté :", bp_test_final$parameter, "\n")
+cat("P-value :", round(bp_test_final$p.value, 4), "\n")
+
+# Interprétation standard
+if (bp_test_final$p.value > 0.05) {
+  cat("Conclusion : H0 acceptée. L'hétéroscédasticité est absente (standard).\n")
+} else {
+  cat("Conclusion : H0 rejetée. L'hétéroscédasticité persiste (standard).\n")
+}
 
 
+####################################################
+### Test de Breusch-Pagan avec erreurs robustes ###
+####################################################
+
+# Test de Breusch-Pagan avec erreurs robustes
+residuals_squared <- residuals(model_final_corrige)^2
+fitted_values <- fitted(model_final_corrige)
+
+bp_test_robuste <- summary(lm(residuals_squared ~ fitted_values))
+p_value <- pf(bp_test_robuste$fstatistic[1], 
+              bp_test_robuste$fstatistic[2], 
+              bp_test_robuste$fstatistic[3], 
+              lower.tail = FALSE)
+
+# Résultat
+if (p_value > 0.05) {
+  cat("H0 validée : Présence d'homoscédasticité.\n")
+} else {
+  cat("H0 rejetée : Hétéroscédasticité détectée.\n")
+}
