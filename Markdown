@@ -487,19 +487,16 @@ rm(alias_summary)
 
 Ensuite, nous calculons le Facteur d’inflation de la variance *(VIF)* pour chaque variable afin d’identifier et d’éliminer celles présentant une multicolinéarité excessive. En effet, un VIF élevé indique que l’estimation du coefficient est instable.Cette étape, effectuée après l’analyse de la corrélation, vise à réduire les redondances et à garantir un jeu de variables final, stable et fiable.
 
-```
+```{r blabla1, include=FALSE}
 # Charger les bibliothèques nécessaires
 library(car)  # Pour le calcul du VIF
 library(dplyr)
 library(writexl)
-
-data_work3 <- read_xlsx("//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work3.xlsx")
-
-cat("\n### Début de la détection des VIF élevés dans data_work3 ###\n")
-
-# Identifier les variables explicatives
+  # Identifier les variables explicatives
 variables_explicatives <- setdiff(names(data_work3), c("fec", "Temps"))
+```
 
+```
 # Créer une copie des données pour le processus VIF
 data_for_vif <- data_work3
 
@@ -556,43 +553,29 @@ while (TRUE) {
 data_work4 <- data_for_vif
 
 # Sauvegarder les données finales sans VIF élevé
-write_xlsx(data_work4, "//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work4.xlsx")
+write_xlsx(data_work4, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work4.xlsx")
 cat("Les données finales après suppression des variables avec VIF > ", vif_threshold, " ont été sauvegardées sous 'Data_Work4.xlsx'.\n")
-
-
-# Imprimer les noms des colonnes du nouveau DataFrame `data_work4`
-cat("\nNoms des colonnes du DataFrame `data_work4` :\n")
-print(names(data_for_vif))
-
-# Sauvegarder le DataFrame
-write_xlsx(data_work4, "//Users/mehdifehri/Desktop/R/Code Final Fec/Data_work4.xlsx")
-cat("Le fichier a été sauvegardé avec succès.\n")
-
-
-
-rm(current_model)
-rm(data_work3)
-rm(iteration_results)
-rm(removed_variables)
-rm(data_for_vif)
-
 ```
 
+Cette boucle nous permet de supprimer les varaibles ayant le VIF le plus élévé jusqu'à obtenir un BIF inférieur à un certain seuil. Ici, nous avons choisi un seuil de 666 mais nous aurions pu l'abaisser (nous avons aussi réalisé une regression en sélectionnant les variables avec un VIF inférieur à 30 par exemple.)
 
-### III.5.	Tests de spécification (RESET), choix de la forme fonctionnelle
+## IV. Première regression 
+### IV.1.	Tests de spécification (RESET)
 
 Par la suite, nous avons réalisé le *test RESET* pour vérifier la forme fonctionnelle du modèle, en nous assurant qu’il était bien linéaire ou s’il manquait des non-linéarités. Cette vérification intervient après avoir nettoyé et stabilisé les données pour s’assurer que la spécification du modèle est correcte et que les coefficients ne sont pas biaisés. Si nécessaire, nous avons ajusté la forme fonctionnelle pour améliorer la qualité du modèle.
 
 
-```
+```{r bla20, include=FALSE}
 library(readxl)
 library(dplyr)
 library(lmtest)
 library(writexl)
 
 # Charger les données
-data_work4 <- read_xlsx("//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work4.xlsx")
+data_work4 <- read_xlsx("C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work4.xlsx")
+```
 
+``` {r test RESET, include=TRUE}
 # Modèle OLS de base
 model_ols <- lm(fec ~ . - Temps, data = data_work4)
 print(summary(model_ols))
@@ -602,7 +585,7 @@ print(summary(model_ols))
 data_work4_log <- data_work4 %>%
   mutate(across(-c(Temps, fec), log, .names = "log_{.col}")) %>%
   select(Temps, fec, starts_with("log_"))
-write_xlsx(data_work4_log, "//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work4_Log.xlsx")
+write_xlsx(data_work4_log, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work4_Log.xlsx")
 
 # Modèle OLS avec les variables explicatives transformées en log
 model_ols_log <- lm(fec ~ . - Temps, data = data_work4_log)
@@ -632,11 +615,11 @@ if (reset_test_ols_log$p.value > 0.05) {
 
 ```
 
-### III.6.	Choix de la meilleure transformation : Transformation logarithmique des variables explicatives et régression OLS (interprétation double log ?)  
+### IV.2.	Choix de la meilleure transformation : Transformation logarithmique des variables explicatives et régression OLS
 
 Une fois la forme fonctionnelle validée, nous avons opté pour une transformation logarithmique des variables explicatives et estimé un modèle en double-log. Cette transformation est utile si les relations sont multiplicatives, car elle stabilise la variance et facilite l’interprétation en termes d’élasticités. Cela rend le modèle plus stable et cohérent économiquement.
 
-```
+```{r comparaison, include=TRUE}
 # Initialisation du tableau récapitulatif
 model_comparison <- data.frame(
   Model = character(),
@@ -684,8 +667,11 @@ for (name in names(models)) {
 # Afficher le tableau comparatif des modèles
 print(model_comparison)
 
+```
+
+```{r bla 20, include=FALSE}
 # Sauvegarder le tableau comparatif dans un fichier Excel
-write_xlsx(model_comparison, "//Users/mehdifehri/Desktop/R/Code Final Fec/Model_Comparison.xlsx")
+write_xlsx(model_comparison, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Model_Comparison.xlsx")
 
 rm(model)
 rm(model_comparison)
@@ -704,9 +690,7 @@ library(dplyr)
 library(readxl)
 ```
 
-## IV. Première regression
-### A. Résultats
-### B. Tests des hypothèses de Gauss-Markov
+### IV.3. Tests des hypothèses de Gauss-Markov
 
 ## V. Deuxième regression
 ### A. Détrendisation
