@@ -105,8 +105,104 @@ data_work <- data_clean %>%
 
 ```
 
+### II.2. Standardisation du taux de fécondité
+Afin de réduire l'autocorrélation et de pouvoir appliquer des Modèles comme *Arima* ou *GLS*, nous avions besoin de données **stationnaires**.
+Nous avons donc d'abord essyer de soustraire la trend linéaire à la variable fec.
 
-### II.2. Création d’un jeu de données sans les outliers et tableau récapitulatif 
+```{r détrendisation, include=TRUE, warning=FALSE}
+modele_tendance <- lm(fec ~ Temps, data = data_work)
+tendance_estimee <- fitted(modele_tendance)
+
+# Dé-trending de la série fec
+data_work$fec_detrend <- data_work$fec - tendance_estimee
+
+# Test ADF sur la série détrendue
+cat("\n--- Test ADF sur la série détrendue (fec_detrend) ---\n")
+adf_result_detrend <- adf.test(na.omit(data_work$fec_detrend), alternative = "stationary")
+print(adf_result_detrend)
+```
+
+Puisque même en soustrayant la trend, la fonction Fec n'était pas stationnaire, nous avons décidé d'effectuer une différenciation de la série fec, c'est à dire de calculer le taux de variation entre t et t-1.
+
+```{r bla6, include=TRUE}
+# 7. Différenciation de la série détrendue
+data_work$fec_detrend_diff <- c(NA, diff(data_work$fec_detrend))
+
+# Test ADF sur la série détrendue différenciée
+cat("\n--- Test ADF sur la série détrendue différenciée (fec_detrend_diff) ---\n")
+adf_result_detrend_diff <- adf.test(na.omit(data_work$fec_detrend_diff), alternative = "stationary")
+print(adf_result_detrend_diff)
+```
+
+```{r détrend, include=FALSE}
+# 8. Différenciation directe de la série brute
+data_work$fec_diff <- c(NA, diff(data_work$fec))
+
+# Test ADF sur la série brute différenciée
+cat("\n--- Test ADF sur la série brute différenciée (fec_diff) ---\n")
+adf_result_fec_diff <- adf.test(na.omit(data_work$fec_diff), alternative = "stationary")
+print(adf_result_fec_diff)
+
+
+# 9. Créer data_work_trend avec les variables nécessaires
+# Inclure toutes les variables (Temps, fec, fec_detrend, fec_detrend_diff, fec_diff et création de fec_diff_relative)
+data_work_trend <- data.frame(
+  Temps = data_work$Temps,
+  fec = data_work$fec,
+  fec_detrend = data_work$fec_detrend,
+  fec_detrend_diff = data_work$fec_detrend_diff,
+  fec_diff = data_work$fec_diff
+) %>%
+  mutate(fec_var_relative = fec_diff / fec) # Ajouter fec_diff_relative
+
+# Ajouter les variables explicatives
+for (var in vars_explicatives) {
+  data_work_trend[[var]] <- data_work[[var]]
+}
+
+# 10. Nettoyer le data_work_trend pour supprimer les lignes avec des NA
+data_work_trend <- data_work_trend[complete.cases(data_work_trend), ]
+
+# 11. Créer le dataframe fec_transformed (sans variables explicatives)
+# On garde que Temps, fec, fec_detrend, fec_detrend_diff, fec_diff
+fec_transformed <- data_work_trend[, c("Temps", "fec", "fec_detrend", "fec_detrend_diff", "fec_diff","fec_var_relative")]
+
+```
+
+```{r plot détrendé, include=TRUE}
+# Superposer fec_detrend_diff et fec_diff sur un seul graphique avec un label en bas
+plot(data_work_trend$Temps, data_work_trend$fec_detrend_diff, type = "l", col = "green",
+     main = "Comparaison : Fec détrendue différenciée et Fec brute différenciée",
+     xlab = "Temps", ylab = "Valeurs", lwd = 2)
+```
+Ainsi, nous avons un modèle avec une variable fec différenciée et donc stationnaire.
+
+```{r blabla8, include=FALSE}
+# 1. Modèle : notre variable Fec expliquée par la tendance ? 
+modele_fec_vs_detrend <- lm(fec ~ fec_detrend, data = data_work_trend)
+r2_fec_vs_detrend <- summary(modele_fec_vs_detrend)$r.squared
+cat(sprintf("- Fec expliquée par Fec_detrend : %.2f%%\n", r2_fec_vs_detrend * 100))
+
+# Ajuster le dataframe data_work_trend
+data_work_trend <- data_work_trend %>%
+  select(Temps, fec_var_relative, everything(), -fec, -fec_detrend, -fec_detrend_diff, -fec_diff) # Réorganiser et supprimer les colonnes inutiles
+
+write_xlsx(data_work_trend, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work_trend.xlsx")
+
+
+rm(adf_result_detrend)
+rm(adf_result_detrend_diff)
+rm(adf_result_fec)
+rm(adf_result_fec_diff)
+rm(data_work)
+rm(stationarity_results)
+rm(modele_detrend_diff_vs_diff)
+rm(modele_fec_vs_detrend)
+rm(modele_tendance)
+
+```
+
+### II.3. Création d’un jeu de données sans les outliers et tableau récapitulatif 
 
 Nous créons un nouveau jeu de données, `data_work2`, en supprimant les observations identifiées comme outliers, garantissant un ensemble de données nettoyées et prêtes pour les analyses.
 En complément,un tableau récapitulatif liste les observations extrêmes avec leur période `(Temps)`, leur valeur de fécondité `(fec)`, et leurs résidus standardisés `(Std_Resid)`.
@@ -189,99 +285,25 @@ data_work2 <- data_work_trend %>%
 ```   
 
 ## III. Tri des variables 
-# III. Tri des variables
 
 Nous avons traité les variables pour réduire les risques d’erreurs de spécification, de biais et d’instabilité du modèle, et améliorer la pertinence, la robustesse et la précision des estimations : 
 
-### III.1.Traitement des outliers et création d'un nouveau jeu de données sans outliers
-
-Après avoir identifié les outliers, nous avons supprimé les observations extrêmes afin d’éviter qu’elles n’affectent l’ensemble du modèle pour stabiliser les estimations et obtenir des coefficients plus représentatifs de la tendance générale des données, ce qui rend le modèle plus fiable.
-
-
-```
-cat("\n### Détection et traitement des outliers sur le modèle standardisé ###\n")
-
-# Étape 1 : Ajuster le modèle global sur `data_work1`
-model_standardized <- lm(fec ~ ., data = data_work_trend %>% select(-Temps))
-
-# Étape 2 : Calculer les résidus bruts et standardisés
-residuals_standardized_df <- data.frame(
-  Index = seq_len(nrow(data_work_trend)),
-  Resid = residuals(model_standardized),      # Résidus bruts
-  Std_Resid = rstandard(model_standardized),  # Résidus standardisés
-  Temps = data_work_trend$Temps,
-  fec = data_work_trend$fec
-)
-
-# Étape 3 : Visualiser les résidus bruts
-plot_residus_bruts <- ggplot(residuals_standardized_df, aes(x = Index, y = Resid)) +
-  geom_point(color = "darkorange") +
-  geom_hline(yintercept = 0, color = "blue", linetype = "dashed") +
-  labs(
-    title = "Résidus Bruts (Modèle Standardisé)",
-    x = "Index d'observation",
-    y = "Résidus bruts"
-  ) +
-  theme_minimal()
-
-print(plot_residus_bruts)
-
-# Étape 4 : Visualiser les résidus standardisés (zoomé sur ±3)
-threshold_zoom <- 2
-plot_residus_standardises <- ggplot(residuals_standardized_df %>% filter(abs(Std_Resid) <= threshold_zoom)) +
-  geom_point(aes(x = Index, y = Std_Resid), color = "blue") +
-  geom_hline(yintercept = c(-1, 1), color = "red", linetype = "dashed") +
-  labs(
-    title = "Résidus Standardisés (Zoomé)",
-    x = "Index d'observation",
-    y = "Résidus standardisés"
-  ) +
-  theme_minimal()
-
-print(plot_residus_standardises)
-
-# Étape 5 : Identifier les outliers
-threshold <-2   # Seuil pour identifier les outliers
-outliers_standardized_df <- residuals_standardized_df %>%
-  filter(abs(Std_Resid) > threshold)
-
-cat("\n### Résumé des outliers identifiés ###\n")
-print(outliers_standardized_df)
-
-# Étape 6 : Créer un nouveau DataFrame sans les outliers (`data_work2`)
-data_work2 <- data_work_trend %>%
-  mutate(Index = seq_len(nrow(data_work_trend))) %>%
-  filter(!Index %in% outliers_standardized_df$Index) %>%
-  select(-Index)
-
-# Étape 7 : Tableau récapitulatif des outliers
-recap_outliers <- outliers_standardized_df %>%
-  select(Temps, fec, Std_Resid)
-
-# Sauvegarder les résultats finaux
-write_xlsx(data_work2, "//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work2.xlsx")
-write_xlsx(recap_outliers, "//Users/mehdifehri/Desktop/R/Code Final Fec/Recap_Outliers.xlsx")
-
-rm(recap_outliers)
-rm(model_standardized)
-rm(outliers_standardized_df)
-rm(residuals_standardized_df)
-```
-
-### III.2. Détection et traitement de la colinéarité parfaite (alias)
+### III.1. Détection et traitement de la colinéarité parfaite (alias)
 
 Nous avons vérifié la présence de relations linéaires parfaites entre les variables explicatives et supprimé les variables redondantes. Sans cette étape, certains coefficients ne seraient pas identifiables, ce qui poserait un problème d’estimation. Cette vérification après le nettoyage des données est cruciale pour s’assurer qu’il n’y a pas de blocages mathématiques dans la régression, garantissant ainsi une estimation stable et une interprétation claire des coefficients.
 
-```
+``` {r bla8, include=FALSE}
 cat("\n### Détection des alias (colinéarité parfaite) ###\n")
 
 # Étape 1 : Ajuster le modèle global pour `data_work2`
 model_alias <- lm(fec ~ ., data = data_work2 %>% select(-Temps))
+```
 
-# Étape 2 : Utiliser le modèle global pour identifier les alias
+```{r alias, include=TRUE, warning=FALSE}
+# Étape 1 : Utiliser le modèle global pour identifier les alias
 alias_info <- alias(model_alias)
 
-# Étape 3 : Extraire les colinéarités parfaites
+# Étape 2 : Extraire les colinéarités parfaites
 alias_matrix <- alias_info$Complete  # Matrice de colinéarités parfaites
 
 # Vérifier si des alias existent
@@ -303,7 +325,7 @@ if (is.null(alias_matrix)) {
   print(alias_summary)
   
   # Étape 5 : Sauvegarder les colinéarités dans un fichier Excel
-  write_xlsx(alias_summary, "//Users/mehdifehri/Desktop/R/Colinear_Variables_Data_Work2.xlsx")
+  write_xlsx(alias_summary, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Colinear_Variables_Data_Work2.xlsx")
   cat("La liste des colinéarités parfaites a été sauvegardée dans 'Colinear_Variables_Data_Work2.xlsx'.\n")
 }
 
@@ -317,14 +339,13 @@ data_work3 <- data_work2 %>%
   select(-all_of(alias_vars))
 
 # Étape 8 : Sauvegarder le DataFrame mis à jour
-write_xlsx(data_work3, "//Users/mehdifehri/Desktop/R/Code Final Fec/Data_Work3.xlsx")
+write_xlsx(data_work3, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work3.xlsx")
 cat("Le nouveau DataFrame sans alias a été sauvegardé sous 'Data_Work3.xlsx'.\n")
 
 # Étape 9 : Résumer les variables supprimées
 removed_variables_summary <- data.frame(Variables_Supprimées = alias_vars)
-write_xlsx(removed_variables_summary, "//Users/mehdifehri/Desktop/R/Code Final Fec/Removed_Variables_Alias.xlsx")
-cat("Résumé des variables supprimées enregistré sous 'Removed_Variables_Alias.xlsx'.\n")
-
+```
+```{r, bla11, include=FALSE}
 rm(data_work2)
 rm(alias_info)
 rm(model_alias)
@@ -333,8 +354,7 @@ rm(alias_matrix)
 rm(alias_pairs)
 rm(alias_summary)
 ```
-
-### III.3.	Analyse de corrélation entre variables explicatives (matrice de corrélation, heatmap, MDS)
+### III.2. Analyse de corrélation entre variables explicatives (matrice de corrélation, heatmap, MDS)
 
 Nous avons ensuite calculé la matrice de corrélation et visualisé les relations entre variables à l’aide de *heatmaps et de MDS*. Cela permet de détecter la multicolinéarité non parfaite, qui, bien que moins évidente, peut fragiliser l’estimation. Cette étape approfondit l’analyse de la redondance entre les variables et aide à affiner la sélection des variables pour le modèle.
 
