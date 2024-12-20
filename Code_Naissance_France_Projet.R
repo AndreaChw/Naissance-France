@@ -1,4 +1,4 @@
-#Code Final
+########## CODE FINAL ############## : ANALYSE DES DETERMINANTS DU TAUX DE FECONDITÉ EN FRANCE
 
 # Chargement des librairies
 library(readxl)
@@ -16,7 +16,7 @@ data <- read_excel("//Users/mehdifehri/Desktop/R/Données/Data R Ajustée.xlsx
   select(-fem, -sco_jeune, -pop, -parc_logement, -viedans5, -agemat, -solo, -loyers, 
          -tailleMenage, -consoalcool, -opi_surpoids, - opi_nervosite, -chomagefem,
          -inegalité_w_privée, -tx_emploifem, -wage_h, -opi_inquietude,
-         -cadre_vie,-opi_guerre, -opi_violence,-confiance_menage)
+         -cadre_vie,-opi_guerre, -opi_violence,-confiance_menage,-opi_affaires)
 
 ##############################################################
 # VISUALISATION DES TENDANCES DES VARIABLES EXPLICATIVES
@@ -839,7 +839,7 @@ if (shapiro_test$p.value > 0.05) {
 }
 
 ####################################################
-# Étape 1 : Résidus de moyenne nulle
+# HYPOTHÈSE 1 : Résidus de moyenne nulle
 ####################################################
 cat("\n--- Étape 1 : Résidus de moyenne nulle ---\n")
 mean_residuals <- mean(residus)
@@ -857,7 +857,7 @@ if (p_value > 0.05) {
 }
 
 ###########################################################
-#####  Étape 2 - EXOGÉNÉITÉ (CONDITION NECESSAIRE)
+#####  HYPOTHÈSE 2 - EXOGÉNÉITÉ (CONDITION NECESSAIRE)
 #########################################################
 
 library(readxl)
@@ -946,7 +946,7 @@ cat("\n### Test de causalité de Granger ###\n")
 # Tester la causalité de Granger pour chaque variable explicative
 
 # Tester la causalité de Granger pour chaque variable explicative et chaque ordre
-orders <- 1:16  # Ordres des tests
+orders <- 1:8  # Ordres des tests
 granger_results <- lapply(variables_explicatives_ols, function(var) {
   lapply(orders, function(order) {
     tryCatch({
@@ -1269,7 +1269,7 @@ rm(Variables_instrumentales)
 rm(Variables_instrumentales1)
 
 ###########################################################
-#####      Étape 2 - Hétéroscédasticité
+#####      HYPOTHÈSE 3 - Hétéroscédasticité
 #########################################################
 
 # Chargement des données et ajustement du modèle
@@ -1392,89 +1392,7 @@ cat("- White : ", ifelse(white_pval > 0.05, "Homoscédasticité", "Hétéroscéd
 
 
 ########################################################
-######## Étape 4 : Autorcorrélation ################
-#############@@@
-
-# Chargement des données
-data_work4_log_out <- read_xlsx("//Users/mehdifehri/Desktop/R/Code Final Fec/data_work4_log_out.xlsx")
-
-variables_explicatives_ols <- setdiff(colnames(data_work4_log_out), c("Temps", "fec"))
-formule_ols <- as.formula(paste("fec ~", paste(variables_explicatives_ols, collapse = " + ")))
-
-# Ajustement du modèle
-model_final <- lm(formule_ols, data = data_work4_log_out)
-
-# Extraction des résidus et des valeurs ajustées
-residus <- residuals(model_final)
-valeurs_ajustees <- fitted(model_final)
-
-
-
-
-#######################################################
-# Partie de Ljung-Box avec détails sur l'autocorrélation
-#######################################################
-
-cat("\n--- Test de Ljung-Box avec visualisation ---\n")
-
-# Étape 1 : Calcul des résidus du modèle final
-residuals_final <- residuals(model_final)
-
-# Étape 2 : Réalisation du test de Ljung-Box
-lag_max <- 10  # Nombre maximum de lags à examiner
-test_lb <- Box.test(residuals_final, lag = lag_max, type = "Ljung-Box")
-
-cat("Résultats du test de Ljung-Box (lag =", lag_max, "):\n")
-print(test_lb)
-
-if (test_lb$p.value > 0.05) {
-  cat("H₀ est vérifiée : il n'y a pas d'autocorrélation des résidus (Ljung-Box).\n")
-} else {
-  cat("H₀ est rejetée : il existe une autocorrélation des résidus (Ljung-Box).\n")
-}
-
-# Étape 3 : Analyse détaillée et visualisation
-
-# 3.1. Calcul des autocorrélations (ACF) et autocorrélations partielles (PACF)
-acf_res <- acf(residuals_final, plot = FALSE)
-pacf_res <- pacf(residuals_final, plot = FALSE)
-
-# 3.2. Visualisation de l'ACF
-plot(acf_res, main = "Autocorrélation (ACF) des résidus", xlab = "Lags", ylab = "Autocorrélation")
-
-# Pause pour visualiser l'ACF avant de passer à la PACF
-cat("\nAppuyez sur [Entrée] pour afficher le graphique de la PACF...\n")
-readline()
-
-# 3.3. Visualisation de la PACF
-plot(pacf_res, main = "Autocorrélation partielle (PACF) des résidus", xlab = "Lags", ylab = "Autocorrélation partielle")
-
-# Étape 4 : Résumé détaillé des ACF
-cat("\n--- Résumé des autocorrélations (ACF) ---\n")
-acf_values <- acf_res$acf[2:(lag_max + 1)]  # Exclure le lag 0
-lags <- 1:lag_max
-acf_summary <- data.frame(Lag = lags, Autocorrelation = acf_values)
-
-print(acf_summary)
-
-# Étape 5 : Résumé des PACF
-cat("\n--- Résumé des autocorrélations partielles (PACF) ---\n")
-pacf_values <- pacf_res$acf[1:lag_max]  # Lags jusqu'à lag_max
-pacf_summary <- data.frame(Lag = lags, Partial_Autocorrelation = pacf_values)
-
-print(pacf_summary)
-
-# Étape 6 : Enregistrer les résultats dans des fichiers Excel
-library(writexl)
-
-write_xlsx(acf_summary, "//Users/mehdifehri/Desktop/R/Données/ACF_Summary.xlsx")
-write_xlsx(pacf_summary, "//Users/mehdifehri/Desktop/R/Données/PACF_Summary.xlsx")
-
-cat("Les résumés des ACF et PACF ont été sauvegardés sous 'ACF_Summary.xlsx' et 'PACF_Summary.xlsx'.\n")
-
-
-########################################################
-######## Étape 4 : Diagnostic de l'autocorrélation #####
+######## HYPOTHÈSE 4 : Diagnostic de l'autocorrélation #####
 ########################################################
 
 library(car)
