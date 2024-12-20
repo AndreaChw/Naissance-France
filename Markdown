@@ -9,21 +9,24 @@ author:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+
 library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(writexl)
+library(tseries)
 
 data <- read_excel("C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data R Ajustée.xlsx") %>%
   rename_with(~ gsub("-", "_", .), everything()) %>%
   select(-fem, -sco_jeune, -pop, -parc_logement, -viedans5, -acceuilenf, -agemat,)
+numeric_cols <- setdiff(colnames(data), "Temps")
 
 ```
 
-## Introduction
-### A. Choix de la variable dépendante
+## I. Introduction
+### I.1. Choix de la variable dépendante
 En 2023, 678.000 enfants sont nés en France, c'est le chiffre le plus faibe depuis 1938 (hors période de guerre).
 
 Cette baisse de la natalité est devenue un sujet central au point où Emmanuel Macron parle de la nécéssité d'un *"réarmement démographique"* pour la France. Nous avons donc décidé d'étudier cette question et de tenter de déterminer **les déterminants de cette baisse de la natalité**.
@@ -38,9 +41,14 @@ print(
     geom_line(color = "blue") +
     labs(title = paste("Variation du taux de fécondité de 1991 à 2020"), x = "Temps", y = "fec")
 )
+numeric_cols <- setdiff(colnames(data), c("Temps", "fec"))
+
 ```
 
-### B. Les variables explicatives
+Nous avons sélectionné la plage de temps pour laquelle nous avions le plus de données, c'est à dire 1991-2019.
+Nous avons choisi d'exclure l'année 2020 car la crise du covid a fortement impacté le taux de fécondité. 
+
+### I.2. Les variables explicatives
 Nous nous sommes d'abord concertés pour déterminer toutes les varaibles qui pourraient potentiellement expliquer ou être corrélées avec le taux de fécondité, organisées en 5 catégories :
 
   - Facteurs socio-culturels
@@ -53,9 +61,15 @@ Nous nous sommes d'abord concertés pour déterminer toutes les varaibles qui po
   
   - Facteurs individuels et comportementaux
 
-Nous avons réuni 37 variables.
+Nous avons réuni **37 variables explicatives**.
 
+Nous avons identifié celles avec qui avaient le plus de corrélation avec les autres, afin de sélectionner les plus **pertinantes**.
+
+![image](C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/ReprésentationMDS.jpg)
+
+Finalement, nous avons retenues les variables suivantes :
 *(mettre la présentation des variables ici mais on les a pas décidées encore)*
+
 ## II. Premier traitement de nos variables explicatives
 ### II.1. Interpolation linéaire des années (1991 - 2019) et création des variables décalées `lag`
 
@@ -63,7 +77,15 @@ Nous avons régularisé la variable temps en générant une séquence trimestrie
 
 Ensuite, nous avons utilisé une fonction `lag` pour créer des variables décalées, en considérant que la natalité à une période donnée *(t)* est influencée par les politiques familiales et son propre niveau à la période précédente *(t-1)*. Cette hypothèse repose sur le fait qu’une gestation dure environ **9 mois**, ce qui implique un effet différé des facteurs explicatifs d’une année sur les naissances de l'année suivante 
 
-``` 
+```{r libraries, include=FALSE}
+library(readxl)
+library(tseries)
+library(ggplot2)
+library(dplyr)
+
+```
+
+```{r interpolation, include= TRUE, warning=FALSE}
 # Interpolation trimestrielle et création des variables décalées (lags)
 data_clean <- data %>%
   complete(Temps = seq(min(Temps), max(Temps), by = 0.25)) %>%
@@ -72,14 +94,58 @@ data_clean <- data %>%
   arrange(Temps) %>%
   mutate(across(setdiff(numeric_cols, "fec"), ~ lag(., n = 4), .names = "lag_{col}")) %>%
   drop_na(starts_with("lag_"))
-```  
+
+# Sélectionner uniquement les colonnes nécessaires pour le modèle
+data_work <- data_clean %>%
+  select(Temps, fec, starts_with("lag_"))
+
+```
+
 
 ### II.2. Création d’un jeu de données sans les outliers et tableau récapitulatif 
 
 Nous créons un nouveau jeu de données, `data_work2`, en supprimant les observations identifiées comme outliers, garantissant un ensemble de données nettoyées et prêtes pour les analyses.
 En complément,un tableau récapitulatif liste les observations extrêmes avec leur période `(Temps)`, leur valeur de fécondité `(fec)`, et leurs résidus standardisés `(Std_Resid)`.
 
+```{r bla, include=FALSE}
+data_work_trend <- read_xlsx("C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work_trend.xlsx")
+
+# Renommer 'fec_diff_relative' en 'fec'
+data_work_trend <- data_work_trend %>%
+  rename(fec = fec_var_relative)
+
+# 1. Modèle standardisé (centré et réduit)
+data_model_standardized <- data_work_trend %>%
+  mutate(across(starts_with("lag_"), ~ scale(.)))
+
+model_standardized <- lm(fec ~ . - Temps, data = data_model_standardized)
+# Étape 2 : Calculer les résidus bruts et standardisés
+residuals_standardized_df <- data.frame(
+  Index = seq_len(nrow(data_work_trend)),
+  Resid = residuals(model_standardized),      # Résidus bruts
+  Std_Resid = rstandard(model_standardized),  # Résidus standardisés
+  Temps = data_work_trend$Temps,
+  fec = data_work_trend$fec
+)
 ```
+
+```{r résidus}
+threshold_zoom <- 3
+plot_residus_standardises <- ggplot(residuals_standardized_df %>% filter(abs(Std_Resid) <= threshold_zoom)) +
+  geom_point(aes(x = Index, y = Std_Resid), color = "blue") +
+  geom_hline(yintercept = c(-1, 1), color = "red", linetype = "dashed") +
+  labs(
+    title = "Résidus Standardisés (Zoomé)",
+    x = "Index d'observation",
+    y = "Résidus standardisés"
+  ) +
+  theme_minimal()
+
+print(plot_residus_standardises)
+
+```
+
+``` { r outliers, include=TRUE}
 # Étape 6 : Créer un nouveau DataFrame sans les outliers (`data_work2`)
 data_work2 <- data_work1 %>%
   mutate(Index = seq_len(nrow(data_work1))) %>%
@@ -90,8 +156,12 @@ data_work2 <- data_work1 %>%
 recap_outliers <- outliers_standardized_df %>%
   select(Temps, fec, Std_Resid)
 ```   
-## III. Tri des variables 
 
+### II.3. Suppression des colinéarités parfaites.
+
+## III. Tri des variables 
+ 
+Nous avons créé
 ## IV. Première regression
 ### A. Résultats
 ### B. Tests des hypothèses de Gauss-Markov
