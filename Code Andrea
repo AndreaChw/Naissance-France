@@ -1,3 +1,93 @@
+# Liste des variables et leurs explications
+# acceuilenf: Nombre d'établissements et services d'accueil pour jeunes enfants
+# actions: Cours des actions
+# agemat: âge moyen à la maternité
+# aidessociales: Aides sociales à l'enfance
+# Alcosuici: Morts par alcoolisme et suicides
+# ameliorndv: Sentiment d'amélioration du niveau de vie sur 10 ans
+# amelioreds: Amélioration de l'état de santé des Français
+# affaires: Indicateur de climat des affaires
+# avenirpauvr: Anticipation d'une augmentation de l'exclusion et de la pauvreté
+# Bacheliers: Proportion générationnelle de bacheliers
+# cdv: Cadre de vie
+# chomagefem: Taux de chômage des femmes
+# Consoalcool: Consommation d'alcool
+# Condiloge: Dynamique amélioration conditions de logement
+# confiance: Indicateur synthétique de confiance des ménages
+# crisefinanc: Préoccupation concernant la crise financière
+# deficit: Déficit de l'État
+# depression: Taux de dépression
+# depseniors: Taux de dépendance seniors
+# dieav45: Risque de mourir avant 45 ans
+# dioazote: Dioxyde d’azote
+# Evg: Espérance de vie générale
+# ecroue: Nombre de personnes écrouées en milliers
+# emploifem: Taux d'emploi des femmes
+# etr_mig: Population étrangère et immigrée en France
+# étudesup: Proportion de la population ayant poursuivi des études supérieures au bac
+# famille: La famille comme lieu de bien-être et de détente
+# Famono: Proportion de Famille monoparentale
+# fec: Indicateur conjoncturel de fécondité pour 100 femmes
+# fem: Proportion femmes en âge de procréer
+# Ginired: Indice de Gini après redistribution
+# h-f: Écarts hommes-femmes
+# i_lt: Taux d'intérêt à long terme
+# Ineg-w-privé: Inégalité salariale dans le secteur privé
+# inegpatrim: Inégalité de patrimoine
+# injustice: Perception de l'injustice sociale
+# inq: Niveau d'inquiétude général
+# inqguerre: Préoccupation concernant la guerre
+# IPL: Indice des prix des logements
+# IPC: Indice des prix à la consommation
+# IVG-100: Nombre d'IVG pour 100 naissances
+# jeunesse: Proportion de jeunes
+# Lithosto: Nombre de lits d'hôpitaux
+# Logedispo: Logements disponibles
+# Loyers: Indice des Loyers
+# menenfants: Proportion de ménage avec enfants
+# migr: Excédent migratoire évalué - France métropolitaine
+# naiss: Nombre de naissances vivantes
+# naiss_etr: Part de naissance ayant au moin 1 parent né à l'etranger (%)
+# naisshorsma: Proportion naissance hors mariage
+# naiss-mort: Excédent des naissances sur les décès - France métropolitaine
+# nervosite: Taux de nervosité
+# nivomedavred: Niveau de vie Médian avant redistribution
+# Nochild: Rapport Couple sans enfant
+# nuptialite: Taux de nuptialité
+# oisbati: Milieu bâti
+# oisagri: Milieu agricole
+# oisforet: Milieu forestier
+# op_w_fem: Évolution des opinions sur le travail des femmes
+# optimav: Optimisme sur l'avenir
+# optimgen: Optimisme pour les générations futures
+# optimndv: Opinion sur le niveau de vie futur
+# optimpx: Opinion sur l'évolution future des prix
+# oisbati: Milieu bâti
+# oisforet: Milieu forestier
+# oisagri: Milieu agricole
+# ozone: Ozone
+# PA: Pouvoir d'achat arbitraire en UC
+# part_etr: Au moins un des parents nés à l'étranger
+# pauvreté: Taux de pauvreté
+# PIB_hab: PIB par habitant
+# PM: Particules PM
+# pop: Population totale au 1er janvier - France métropolitaine
+# popmoyenne: Population moyenne de l'année - France métropolitaine
+# preoenvi: Préoccupation pour l'environnement
+# preoviol: Préoccupation pour la violence
+# precafem: Taux de précarité de l'emploi des femmes
+# Scojeune: Indice synthétique de scolarisation des jeunes
+# Solo: Nombre de personnes vivant seules
+# soufre: Dioxyde de soufre
+# speprofemmes: Spécialisation professionnelle des femmes
+# spepromenages: Spécialisation professionnelle des ménages
+# surpoids: Population autodéclarée en surpoids
+# tpspartiel: Quotité de temps de travail partiel
+# txaccroi: Taux d'accroissement naturel pour 1000 habitants - France métropolitaine
+# viedans5: Perception de la qualité de vie dans 5 ans
+# w-h: Taux de croissance Rémunération horaire
+
+
 ############ INTERPOLAITON, LAG DE TEMPS, LINEARISATION DES VARIABLES
 # rm(list = ls())
 
