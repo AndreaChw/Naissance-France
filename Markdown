@@ -9,7 +9,6 @@ author:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 
 library(readxl)
 library(dplyr)
@@ -20,8 +19,13 @@ library(tseries)
 
 data <- read_excel("C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data R Ajustée.xlsx") %>%
   rename_with(~ gsub("-", "_", .), everything()) %>%
-  select(-fem, -sco_jeune, -pop, -parc_logement, -viedans5, -acceuilenf, -agemat,)
-numeric_cols <- setdiff(colnames(data), "Temps")
+  # Suppression de certaines variables jugées non pertinantes
+  select(-fem, -sco_jeune, -pop, -parc_logement, -viedans5, -agemat, -solo, -loyers, 
+         -tailleMenage, -consoalcool, -opi_surpoids, - opi_nervosite, -chomagefem,
+         -inegalité_w_privée, -tx_emploifem, -wage_h, -opi_inquietude,
+         -cadre_vie,-opi_guerre, -opi_violence,-confiance_menage,-opi_affaires)
+numeric_cols <- setdiff(colnames(data), c("Temps", "fec"))
+
 
 ```
 
@@ -108,6 +112,30 @@ Nous créons un nouveau jeu de données, `data_work2`, en supprimant les observa
 En complément,un tableau récapitulatif liste les observations extrêmes avec leur période `(Temps)`, leur valeur de fécondité `(fec)`, et leurs résidus standardisés `(Std_Resid)`.
 
 ```{r bla, include=FALSE}
+# Sélectionner uniquement les colonnes nécessaires pour le modèle
+data_work <- data_clean %>%
+  select(Temps, fec, starts_with("lag_"))
+
+# Sauvegarder le DataFrame intermédiaire
+write_xlsx(data_work, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work.xlsx")
+cat("Le fichier 'Data_Work.xlsx' a été sauvegardé après l'interpolation et le lag.\n")
+
+#préparation des variables instrumentales candidates (condition nécessaire pour les pb d'endogénéités)
+Variables_instrumentales <- data_work %>% select(Temps, lag_opi_depression, lag_depseniors, lag_synthé_Oiseau, lag_lt_interest_rate, 
+                                                 lag_opi_famille, lag_opi_work_fem, lag_pib_hab, lag_acceuilenf, lag_opi_niveau_vie)
+
+# Mise à jour de `data_work` en supprimant les variables instrumentales
+data_work <- data_work %>% select(-c(lag_opi_depression, lag_depseniors, lag_synthé_Oiseau, lag_lt_interest_rate, lag_opi_famille, lag_opi_work_fem,
+                                     lag_pib_hab, lag_acceuilenf, lag_opi_niveau_vie))
+
+# Sauvegarder les résultats
+write_xlsx(data_work, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work.xlsx")
+write_xlsx(Variables_instrumentales, "C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Variables_Instrumentales.xlsx")
+
+library(dplyr)
+rm(data)
+rm(data_clean)
+
 data_work_trend <- read_xlsx("C:/Users/PC/Documents/Cours/Master/S1/Econométrie TD/Projet/Data_Work_trend.xlsx")
 
 # Renommer 'fec_diff_relative' en 'fec'
@@ -145,23 +173,26 @@ print(plot_residus_standardises)
 
 ```
 
-``` { r outliers, include=TRUE}
+``` {r outliers, include=TRUE}
+# Étape 5 : Identifier les outliers
+threshold <-2   # Seuil pour identifier les outliers
+outliers_standardized_df <- residuals_standardized_df %>%
+  filter(abs(Std_Resid) > threshold)
+
+cat("\n### Résumé des outliers identifiés ###\n")
+print(outliers_standardized_df)
 # Étape 6 : Créer un nouveau DataFrame sans les outliers (`data_work2`)
-data_work2 <- data_work1 %>%
-  mutate(Index = seq_len(nrow(data_work1))) %>%
+data_work2 <- data_work_trend %>%
+  mutate(Index = seq_len(nrow(data_work_trend))) %>%
   filter(!Index %in% outliers_standardized_df$Index) %>%
   select(-Index)
-
-# Étape 7 : Tableau récapitulatif des outliers
-recap_outliers <- outliers_standardized_df %>%
-  select(Temps, fec, Std_Resid)
 ```   
 
-### II.3. Suppression des colinéarités parfaites.
-
 ## III. Tri des variables 
- 
-Nous avons créé
+### III.1. Détection et suppression des variables ayant de la colinéarité parfaite (Alias)
+### III.2. Sélection de variables pertinantes (MDS, réseau, matrice de colinéarité)
+### III.3. Test VIF et suppression des varaibles avec un VIF élevé
+
 ## IV. Première regression
 ### A. Résultats
 ### B. Tests des hypothèses de Gauss-Markov
