@@ -1,6 +1,5 @@
 ---
 title: "Analyse Économétrique : Déterminants de la Baisse des Naissances en France (1991-2019)"
-output: github_document
 ---
 
 ## 💡 Présentation du Projet
